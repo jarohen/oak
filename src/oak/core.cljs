@@ -1,65 +1,97 @@
 (ns oak.core)
 
-(defn start! [{:keys [$el app db view handle]}]
-  )
-
 (defn update-app [{:keys [app db] :as ctx} f & args]
   (apply update ctx :app f args))
 
 (defn update-db [{:keys [app db] :as ctx} f & args]
   (apply update ctx :db f args))
 
-(defn update-in-ctx [{:keys [app] :as ctx} app-path f & args]
-  (let [{new-app :app, :keys [db]} (f (apply narrow ctx app-path))]
-    {:app (assoc-in app app-path new-app)
+(defn update-in-state [{:keys [app db]} ks f & args]
+  (let [{new-app :app, :keys [db]} (f {:app (get-in app ks)
+                                       :db db})]
+    {:app (assoc-in app ks new-app)
      :db db}))
 
-(defn get-in-ctx [{:keys [app db] :as ctx} path]
-  (update ctx :app get-in path))
+(defprotocol IContext
+  (-send! [_ ev])
+  (-nest [_ ev])
+  (-narrow [_ ks]))
 
-(defn ev
-  ([ev-type]
-   (ev ev-type {}))
+(defrecord Context [app db]
+  IContext
+  (-send! [{:keys [::!state ::handle-event ::ev-stack]} ev]
+    (swap! !state (fn [{:keys [app db]}]
+                    ;; TODO split out handle-event result into next val + side effects
+                    (handle-event {:app app, :db db}
+                                  (reduce (fn [sub-event ev]
+                                            (merge ev {:oak/sub-event sub-event}))
+                                          ev
+                                          ev-stack)))))
 
-  ([ev-type ev]
-   (merge ev {:oak/type ev-type})))
+  (-nest [{:keys [::ev-stack]} ev]
+    (-> ctx
+        (update ::ev-stack (cons ev-stack ev))))
 
-(defn wrap-ev [el ev-type opts]
-  (fn [event]
-    (oak/ev ev-type (f event))))
+  (-narrow [ctx ks]
+    (update ctx :app get-in ks)))
 
-(defn h [el]
-  )
+(defn send!
+  ([ctx ev-type]
+   (send! ctx ev-type {}))
+  ([ctx ev-type ev-opts]
+   (-send! ctx (merge ev-opts {:oak/event-type ev-type}))))
+
+(defn nest
+  ([ctx ev-type]
+   (nest ctx ev-type {}))
+  ([ctx ev-type ev-opts]
+   (-nest ctx (merge ev-opts {:oak/event-type ev-type}))))
+
+(defn narrow [ctx & ks]
+  (-narrow ctx ks))
+
+(defn ->ctx [{:keys [handle-event !state]}]
+  (let [{:keys [app db]} @!state]
+    (map->Context {::handle-event handle-event
+                   ::!state state
+                   :app app
+                   :db db
+                   ::ev-stack (list)})))
 
 ;; ---- APP ----
 
-(defn counter-view [{:keys [app db]}]
-  (o/h
-   [:div
-    [:p
-     (:count app)]
-    [:p
-     [:button {:on-click (fn [e]
-                           (oak/ev :inc-clicked))}
-      "Click me!"]]]))
+(def initial-counter
+  {:count 0})
 
-(defn counter-handle [ctx ev]
-  (case (:oak/type ev)
-    :inc-clicked (o/update-app ctx :count inc)))
+(defn counter-view [{:keys [app db] :as ctx}]
+  [:div
+   [:p
+    (:count app)]
+   [:p
+    [:button {:on-click (fn [e]
+                          (o/send! ctx ::inc-clicked))}
+     "Click me!"]]])
 
-(defn handle [ctx ev]
+(defn counter-handle [state ev]
   (case (:oak/type ev)
-    :counter (update-in-ctx ctx [:counters idx] counter-handle (:oak/inner ev))))
+    ::inc-clicked (o/update-app state :count inc)))
+
+(defn handle-event [state {:keys [:oak/event-type :oak/sub-event idx] :as ev}]
+  (case event-type
+    ::counter (update-in-state state [:counters idx] handle-counter-event sub-event)))
 
 (defn view [ctx]
-  (o/h
-   [:div
-    (for [idx (range 2)]
-      (-> (o/h [sub-view (o/get-in-ctx ctx [:counters idx])])
-          (o/wrap-ev :counter {:idx idx})))]))
+  [:div
+   (for [idx (range 2)]
+     [sub-view (-> ctx
+                   (o/nest ::counter {:idx idx})
+                   (o/narrow [:counters idx]))])])
 
-(o/start! {:$el (js/document.getElementById "app")
-           :app {:count 0}
-           :db {}
-           :view view
-           :handle-ev handle})
+(defonce !state
+  {:app {:counters [initial-counter initial-counter]}
+   :db {}})
+
+(defn render! []
+  (r/render-component (js/document.getElementById "app")
+                      [root-component (->ctx {:handle-event handle-event
+                                              :!state !state})]))
