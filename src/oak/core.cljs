@@ -1,16 +1,27 @@
-(ns oak.core)
+(ns oak.core
+  (:require [cljs.core.async :as a])
+  (:require-macros [cljs.core.async.macros :refer [go-loop]]))
 
-(defn update-app [{:keys [app db] :as ctx} f & args]
-  (apply update ctx :app f args))
+(defn update-app [{:keys [app db] :as state} f & args]
+  (apply update state :app f args))
 
-(defn update-db [{:keys [app db] :as ctx} f & args]
-  (apply update ctx :db f args))
+(defn update-db [{:keys [app db] :as state} f & args]
+  (apply update state :db f args))
 
 (defn update-in-state [{:keys [app db]} ks f & args]
   (let [{new-app :app, :keys [db]} (f {:app (get-in app ks)
                                        :db db})]
     {:app (assoc-in app ks new-app)
      :db db}))
+
+(defn ev
+  ([ev-type]
+   (ev ev-type {}))
+  ([ev-type ev-opts]
+   (merge ev-opts {:oak/event-type ev-type})))
+
+(defn with-cmds [state & cmds]
+  (vary-meta state update ::cmds into cmds))
 
 (defprotocol IContext
   (-send! [_ ev])
@@ -19,16 +30,24 @@
 
 (defrecord Context [app db]
   IContext
-  (-send! [{:keys [::!state ::handle-event ::ev-stack]} ev]
-    (swap! !state (fn [{:keys [app db]}]
-                    ;; TODO split out handle-event result into next val + side effects
-                    (handle-event {:app app, :db db}
-                                  (reduce (fn [sub-event ev]
-                                            (merge ev {:oak/sub-event sub-event}))
-                                          ev
-                                          ev-stack)))))
+  (-send! [{:keys [::!state ::handle-event ::ev-stack] :as ctx} ev]
+    (let [{:keys [app db] :as state} (swap! !state (fn [state]
+                                                     (handle-event (-> state
+                                                                       (vary-meta assoc ::cmds #{}))
+                                                                   (reduce (fn [sub-event ev]
+                                                                             (merge ev {:oak/sub-event sub-event}))
+                                                                           ev
+                                                                           ev-stack))))]
+      (doseq [cmd (::cmds (meta state))]
+        (when-let [<ch (cmd)]
+          (go-loop []
+            (when-let [ev (a/<! <ch)]
+              (-send! ctx ev)
+              (recur)))))
 
-  (-nest [{:keys [::ev-stack]} ev]
+      (update ctx merge {:app app, :db db})))
+
+  (-nest [{:keys [::ev-stack] :as ctx} ev]
     (-> ctx
         (update ::ev-stack (cons ev-stack ev))))
 
@@ -53,7 +72,7 @@
 (defn ->ctx [{:keys [handle-event !state]}]
   (let [{:keys [app db]} @!state]
     (map->Context {::handle-event handle-event
-                   ::!state state
+                   ::!state !state
                    :app app
                    :db db
                    ::ev-stack (list)})))
