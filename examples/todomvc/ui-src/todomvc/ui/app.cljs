@@ -1,7 +1,9 @@
 (ns todomvc.ui.app
   (:require [reagent.core :as r]
             [oak.core :as o]
-            [cljs.core.async :as a])
+            [cljs.core.async :as a]
+            [cljs-http.client :as http]
+            [clojure.string :as s])
   (:require-macros [cljs.core.async.macros :refer [go]]))
 
 (enable-console-print!)
@@ -10,32 +12,58 @@
   (js/document.getElementById "app"))
 
 (defn page-root [{:keys [app db] :as ctx}]
-  [:div
-   "Hello world!"
-   [:p (pr-str app db)]
-   [:button {:on-click #(o/send! ctx :inc)}
-    "Inc!"]])
+  [:div {:style {:margin-left "1em"}}
+   [:h3 "Followers"]
+   (if (:loading? app)
+     [:p "loading..."]
 
-(defn handle-event [state {:keys [:oak/event-type] :as ev}]
-  (-> (o/update-app state update :count (case event-type
-                                          :inc inc
-                                          :dec dec))
+     [:ul
+      (doall
+       (for [{:keys [user-id username]} (->> (:followers db)
+                                             (sort-by (comp s/lower-case :username)))]
+         [:li {:key user-id}
+          [:a {:href (str "/users/" user-id)}
+           "@" username]]))])])
+
+(defn <load-followers! [user-id]
+  (go
+    (a/<! (a/timeout 1000))
+    {:success true
+     :body {:followers #{{:user-id "foo"
+                          :username "foo"}
+                         {:user-id "bar"
+                          :username "bar"}}}}))
+
+(defmulti handle-event o/dispatch-by-type)
+
+(defmethod handle-event :app-loaded [state ev]
+  (-> state
+      (o/update-app assoc :loading? true)
       (o/with-cmds (fn []
                      (go
-                       (case (rand-int 3)
-                         0 (o/ev :inc)
-                         1 (o/ev :dec)
-                         2 nil))))))
+                       (let [{:keys [success body]} (a/<! (<load-followers! "me"))]
+                         (if success
+                           (o/ev :followers-loaded {:resp body})
+                           (o/ev :failed-loading-followers {:resp body}))))))))
+
+(defmethod handle-event :followers-loaded [state {:keys [resp]}]
+  (-> state
+      (o/update-app assoc :loading? false)
+      (o/update-db merge resp)))
 
 (defonce !state
   (r/atom {:app {}
            :db {}}))
 
+(defn make-ctx []
+  (o/->ctx {:handle-event handle-event
+            :!state !state}))
+
 (defn render-page! []
   (r/render-component [(fn []
-                         [page-root (o/->ctx {:handle-event handle-event
-                                              :!state !state})])]
+                         [page-root (make-ctx)])]
                       (app-container)))
 
 (defn ^:export main []
-  (render-page! ))
+  (render-page!)
+  (o/send! (make-ctx) (o/ev :app-loaded)))

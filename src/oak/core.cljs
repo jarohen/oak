@@ -54,20 +54,17 @@
   (-narrow [ctx ks]
     (update ctx :app get-in ks)))
 
-(defn send!
-  ([ctx ev-type]
-   (send! ctx ev-type {}))
-  ([ctx ev-type ev-opts]
-   (-send! ctx (merge ev-opts {:oak/event-type ev-type}))))
+(defn send! [ctx ev]
+  (-send! ctx ev))
 
-(defn nest
-  ([ctx ev-type]
-   (nest ctx ev-type {}))
-  ([ctx ev-type ev-opts]
-   (-nest ctx (merge ev-opts {:oak/event-type ev-type}))))
+(defn nest [ctx ev]
+  (-nest ctx ev))
 
 (defn narrow [ctx & ks]
   (-narrow ctx ks))
+
+(defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
+  event-type)
 
 (defn ->ctx [{:keys [handle-event !state]}]
   (let [{:keys [app db]} @!state]

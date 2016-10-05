@@ -39,8 +39,7 @@
 
 (defn make-handler []
   (some-fn (-> (br/make-handler routes/api-routes (api-handlers))
-               (wrap-restful-format :formats [:transit-json :edn :json-kw])
-               )
+               (wrap-restful-format :formats [:transit-json :edn :json-kw]))
 
            (br/make-handler routes/app-routes (constantly page-handler))
 
