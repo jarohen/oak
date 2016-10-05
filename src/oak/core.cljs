@@ -1,6 +1,6 @@
 (ns oak.core
   (:require [cljs.core.async :as a])
-  (:require-macros [cljs.core.async.macros :refer [go-loop]]))
+  (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
 
 (defn update-app [{:keys [app db] :as state} f & args]
   (apply update state :app f args))
@@ -26,33 +26,39 @@
 (defprotocol IContext
   (-send! [_ ev])
   (-nest [_ ev])
-  (-narrow [_ ks]))
+  (-narrow [_ ks])
+  (snapshot [_]))
 
-(defrecord Context [app db]
+(defrecord Context []
   IContext
   (-send! [{:keys [::!state ::handle-event ::ev-stack] :as ctx} ev]
-    (let [{:keys [app db] :as state} (swap! !state (fn [state]
-                                                     (handle-event (-> state
-                                                                       (vary-meta assoc ::cmds #{}))
-                                                                   (reduce (fn [sub-event ev]
-                                                                             (merge ev {:oak/sub-event sub-event}))
-                                                                           ev
-                                                                           ev-stack))))]
-      (doseq [cmd (::cmds (meta state))]
-        (when-let [<ch (cmd)]
-          (go-loop []
-            (when-let [ev (a/<! <ch)]
-              (-send! ctx ev)
-              (recur)))))
+    (let [new-state (swap! !state (fn [state]
+                                    (handle-event (-> state
+                                                      (vary-meta assoc ::cmds #{}))
+                                                  (reduce (fn [sub-event ev]
+                                                            (merge ev {:oak/sub-event sub-event}))
+                                                          ev
+                                                          ev-stack))))]
+      (go
+        (doseq [cmd (::cmds (meta new-state))]
+          (when-let [<ch (cmd)]
+            (loop []
+              (when-let [ev (a/<! <ch)]
+                (a/<! (-send! ctx ev))
+                (recur)))))
 
-      (update ctx merge {:app app, :db db})))
+        ctx)))
 
   (-nest [{:keys [::ev-stack] :as ctx} ev]
     (-> ctx
         (update ::ev-stack (cons ev-stack ev))))
 
   (-narrow [ctx ks]
-    (update ctx :app get-in ks)))
+    (update ctx :app get-in ks))
+
+  (snapshot [{:keys [::!state] :as ctx}]
+    (merge ctx
+           (select-keys @!state [:app :db]))))
 
 (defn send! [ctx ev]
   (-send! ctx ev))
