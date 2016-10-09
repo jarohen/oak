@@ -24,14 +24,13 @@
   (vary-meta state update ::cmds into cmds))
 
 (defprotocol IContext
-  (-send! [_ ev])
-  (-nest [_ ev])
-  (-narrow [_ ks])
-  (snapshot [_]))
+  (send! [_ ev])
+  (nest [_ ev])
+  (narrow [_ ks]))
 
-(defrecord Context []
+(defrecord Context [app db]
   IContext
-  (-send! [{:keys [::!state ::handle-event ::ev-stack] :as ctx} ev]
+  (send! [{:keys [::!state ::handle-event ::ev-stack] :as ctx} ev]
     (let [new-state (swap! !state (fn [state]
                                     (handle-event (-> state
                                                       (vary-meta assoc ::cmds #{}))
@@ -39,35 +38,27 @@
                                                             (merge ev {:oak/sub-event sub-event}))
                                                           ev
                                                           ev-stack))))]
-      (go
-        (doseq [cmd (::cmds (meta new-state))]
-          (when-let [<ch (cmd)]
-            (loop []
-              (when-let [ev (a/<! <ch)]
-                (a/<! (-send! ctx ev))
-                (recur)))))
+      (reduce (fn [<ctx cmd]
+                (go
+                  (let [ctx (a/<! <ctx)]
+                    (if-let [<ch (when cmd (cmd))]
+                      (loop [ctx ctx]
+                        (if-let [ev (a/<! <ch)]
+                          (recur (a/<! (send! ctx ev)))
+                          ctx))
 
-        ctx)))
+                      ctx))))
+              (go
+                (merge ctx (select-keys new-state [:app :db])))
 
-  (-nest [{:keys [::ev-stack] :as ctx} ev]
+              (::cmds (meta new-state)))))
+
+  (nest [{:keys [::ev-stack] :as ctx} ev]
     (-> ctx
         (update ::ev-stack (cons ev-stack ev))))
 
-  (-narrow [ctx ks]
-    (update ctx :app get-in ks))
-
-  (snapshot [{:keys [::!state] :as ctx}]
-    (merge ctx
-           (select-keys @!state [:app :db]))))
-
-(defn send! [ctx ev]
-  (-send! ctx ev))
-
-(defn nest [ctx ev]
-  (-nest ctx ev))
-
-(defn narrow [ctx & ks]
-  (-narrow ctx ks))
+  (narrow [ctx ks]
+    (update ctx :app get-in ks)))
 
 (defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
   event-type)

@@ -1,7 +1,7 @@
 (defproject todomvc ""
 
-  :description "FIXME: write description"
-  :url "http://example.com/FIXME"
+  :description "An example app for the Oak library"
+  :url "https://github.com/jarohen/oak"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
@@ -35,7 +35,6 @@
   :exclusions [org.clojure/clojure org.clojure/clojurescript]
 
   :profiles {:dev {:dependencies [[org.clojure/clojurescript "1.7.228"]
-                                  [jarohen/bounce.mux "0.0.1-alpha2"]
                                   [lein-figwheel "0.5.0-6"]
                                   [com.cemerick/piggieback "0.2.1"]
                                   [reagent "0.5.1"]

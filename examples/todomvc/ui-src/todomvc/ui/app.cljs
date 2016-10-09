@@ -51,18 +51,21 @@
       (o/update-app assoc :loading? false)
       (o/update-db merge resp)))
 
-(defonce root-ctx
+(defonce !state
+  (r/atom {:app {}
+           :db {}}))
+
+(defn root-ctx []
   (o/->ctx {:handle-event handle-event
-            :!state (r/atom {:app {}
-                             :db {}})}))
+            :!state !state}))
 
 (defn render-page! []
   (r/render-component [(fn []
-                         [page-root (o/snapshot root-ctx)])]
+                         [page-root (root-ctx)])]
                       (app-container)))
 
 (defn ^:export main []
   (render-page!)
   (go
-    (let [ctx (a/<! (o/send! root-ctx (o/ev :app-loaded)))]
-      (js/console.log (r/render-to-string [page-root (o/snapshot ctx)])))))
+    (let [ctx (a/<! (o/send! (root-ctx) (o/ev :app-loaded)))]
+      (js/console.log (r/render-to-string [page-root ctx])))))
