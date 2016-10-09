@@ -7,7 +7,8 @@
   {:web-prefix "/static/style"
 
    :dev {:less-classpath-prefix "less"
-         :less-filename "main.less"}
+         :less-filename "main.less"
+         :lessjs-opts {"rootPath" "/static"}}
 
    :build {:lessc-optsv ["--autoprefix=>10%" "--clean-css=--s1 --advanced --compatibility=ie8"]
            :build-path "target/less/build"

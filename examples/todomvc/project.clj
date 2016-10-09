@@ -15,7 +15,7 @@
                  [jarohen/bounce.aleph "0.0.1-alpha1"]
                  [aleph "0.4.1-beta1"]
                  [jarohen/ringless "0.0.1-alpha1"]
-                 [bidi "2.0.3"]
+                 [bidi "2.0.12"]
                  [hiccup "1.0.5"]
                  [ring-middleware-format "0.7.0" :exclusions [ring]]
 
@@ -38,7 +38,8 @@
                                   [lein-figwheel "0.5.0-6"]
                                   [com.cemerick/piggieback "0.2.1"]
                                   [reagent "0.5.1"]
-                                  [cljs-http "0.1.39"]]}}
+                                  [cljs-http "0.1.39"]]
+                   :plugins [[lein-shell "0.4.1"]]}}
 
   :source-paths ["src" "common-src" "../../src"]
 
@@ -49,8 +50,13 @@
   :filespecs [{:type :path, :path "target/cljs/build/mains"}
               {:type :path, :path "target/less/build"}]
 
-  :aliases {"dev" ["run" "-m" "todomvc.service.main"]
+  :aliases {"js-deps" ["do"
+                       ["shell" "npm" "install"]]
+            "dev" ["do"
+                   "js-deps"
+                   ["run" "-m" "todomvc.service.main"]]
             "build" ["do"
                      "clean"
+                     "js-deps"
                      ["run" "-m" "todomvc.service.main/build!"]
                      "uberjar"]})

@@ -19,7 +19,6 @@
         [:head
          [:title "todomvc - CLJS Single Page Web Application"]
 
-         (include-css "//cdnjs.cloudflare.com/ajax/libs/normalize/3.0.3/normalize.min.css")
          (less/include-style style/config)]
 
         [:body
@@ -45,5 +44,6 @@
 
            (br/make-handler (cljs/bidi-routes (bc/ask :cljs-compiler)))
            (less/style-handler style/config)
+           (br/make-handler ["/static/node_modules" (br/resources {:prefix "node_modules"})])
 
            (constantly {:status 404, :body "Not found."})))
