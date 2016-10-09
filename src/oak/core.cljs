@@ -9,8 +9,10 @@
   (apply update state :db f args))
 
 (defn update-in-state [{:keys [app db]} ks f & args]
-  (let [{new-app :app, :keys [db]} (f {:app (get-in app ks)
-                                       :db db})]
+  (let [{new-app :app, :keys [db]} (apply f
+                                          {:app (get-in app ks)
+                                           :db db}
+                                          args)]
     {:app (assoc-in app ks new-app)
      :db db}))
 
@@ -26,7 +28,7 @@
 (defprotocol IContext
   (send! [_ ev])
   (nest [_ ev])
-  (narrow [_ ks]))
+  (-narrow [_ ks]))
 
 (defrecord Context [app db]
   IContext
@@ -55,10 +57,13 @@
 
   (nest [{:keys [::ev-stack] :as ctx} ev]
     (-> ctx
-        (update ::ev-stack (cons ev-stack ev))))
+        (update ::ev-stack #(cons ev %))))
 
-  (narrow [ctx ks]
+  (-narrow [ctx ks]
     (update ctx :app get-in ks)))
+
+(defn narrow [ctx & ks]
+  (-narrow ctx ks))
 
 (defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
   event-type)

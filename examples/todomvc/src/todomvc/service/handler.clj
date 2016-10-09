@@ -8,7 +8,7 @@
             [hiccup.page :refer [html5 include-css include-js]]
             [ringless.core :as less]
             [ring.middleware.format :refer [wrap-restful-format]]
-            [ring.util.response :refer [response content-type]]))
+            [ring.util.response :refer [response content-type charset]]))
 
 ;; This is all in one NS for now, but you'll likely want to split it
 ;; out when your webapp grows!
@@ -36,14 +36,23 @@
 
             nil))})
 
+(defn wrap-utf8 [handler]
+  (fn [req]
+    (when-let [resp (handler req)]
+      (prn resp)
+      (-> resp
+          (charset "utf-8")))))
+
 (defn make-handler []
-  (some-fn (-> (br/make-handler routes/api-routes (api-handlers))
-               (wrap-restful-format :formats [:transit-json :edn :json-kw]))
+  (-> (some-fn (-> (br/make-handler routes/api-routes (api-handlers))
+                   (wrap-restful-format :formats [:transit-json :edn :json-kw]))
 
-           (br/make-handler routes/app-routes (constantly page-handler))
+               (br/make-handler routes/app-routes (constantly page-handler))
 
-           (br/make-handler (cljs/bidi-routes (bc/ask :cljs-compiler)))
-           (less/style-handler style/config)
-           (br/make-handler ["/static/node_modules" (br/resources {:prefix "node_modules"})])
+               (br/make-handler (cljs/bidi-routes (bc/ask :cljs-compiler)))
+               (less/style-handler style/config)
+               (br/make-handler ["/static/node_modules" (br/resources {:prefix "node_modules"})])
 
-           (constantly {:status 404, :body "Not found."})))
+               (constantly {:status 404, :body "Not found."}))
+
+      wrap-utf8))
