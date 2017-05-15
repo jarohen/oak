@@ -9,13 +9,45 @@
 (defn update-db [{:keys [app db] :as state} f & args]
   (apply update state :db f args))
 
-(defn update-in-state [{:keys [app db]} ks f & args]
-  (let [{new-app :app, :keys [db]} (apply f
-                                          {:app (get-in app ks)
-                                           :db db}
+(defn update-push-focus [{:keys [app db stack]} ks f & args]
+  (let [{new-app :app,
+         [{new-outer-app :outer-app} & more-stack] :stack,
+         :keys [db]} (apply f
+                            {:app (get-in app ks)
+                             :db db
+                             :stack (cons {:outer-app app, :ks ks} stack)}
+                            args)]
+
+    {:app (assoc-in new-outer-app ks new-app)
+     :db db
+     :stack more-stack}))
+
+(defn update-pop-focus [{:keys [app db stack]} f & args]
+  (let [[{:keys [outer-app ks]} & more-stack] stack
+        {new-app :app, :keys [db]} (apply f
+                                          {:app (assoc-in outer-app ks app)
+                                           :db db
+                                           :stack more-stack}
                                           args)]
-    {:app (assoc-in app ks new-app)
-     :db db}))
+    {:app (get-in new-app ks)
+     :db db
+     :stack (cons {:outer-app new-app
+                   :ks ks}
+                  more-stack)}))
+
+(comment
+  (-> {:app {:a {:b 1}}, :db {:the-db :is-cool}, :stack ()}
+      (update-push-focus [:a] (fn [state]
+                                (-> state
+                                    (update-push-focus [:c] (fn [state]
+                                                              (-> state
+                                                                  (update-app assoc :d 0)
+
+                                                                  (update-pop-focus (fn [state]
+                                                                                      (-> state
+                                                                                          (update-app assoc :e 2)))))))
+                                    (update-app assoc :d 2)
+                                    (update-db assoc :the-db :wins))))))
 
 (defn ev
   ([ev-type]
