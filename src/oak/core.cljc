@@ -1,6 +1,7 @@
 (ns oak.core
-  (:require [cljs.core.async :as a])
-  (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
+  (:require #?(:clj [clojure.core.async :as a :refer [go go-loop]]
+               :cljs [cljs.core.async :as a]))
+  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]])))
 
 (defn update-app [{:keys [app db] :as state} f & args]
   (apply update state :app f args))
