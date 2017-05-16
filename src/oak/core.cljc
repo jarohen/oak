@@ -9,7 +9,7 @@
 (defn update-db [{:keys [app db] :as state} f & args]
   (apply update state :db f args))
 
-(defn update-push-focus [{:keys [app db stack]} ks f & args]
+(defn with-focus [{:keys [app db stack]} ks f & args]
   (let [{new-app :app,
          [{new-outer-app :outer-app} & more-stack] :stack,
          :keys [db]} (apply f
@@ -22,7 +22,7 @@
      :db db
      :stack more-stack}))
 
-(defn update-pop-focus [{:keys [app db stack]} f & args]
+(defn with-unfocus [{:keys [app db stack]} f & args]
   (let [[{:keys [outer-app ks]} & more-stack] stack
         {new-app :app, :keys [db]} (apply f
                                           {:app (assoc-in outer-app ks app)
@@ -37,17 +37,14 @@
 
 (comment
   (-> {:app {:a {:b 1}}, :db {:the-db :is-cool}, :stack ()}
-      (update-push-focus [:a] (fn [state]
-                                (-> state
-                                    (update-push-focus [:c] (fn [state]
-                                                              (-> state
-                                                                  (update-app assoc :d 0)
-
-                                                                  (update-pop-focus (fn [state]
-                                                                                      (-> state
-                                                                                          (update-app assoc :e 2)))))))
-                                    (update-app assoc :d 2)
-                                    (update-db assoc :the-db :wins))))))
+      (with-focus [:a] (fn [state]
+                         (-> state
+                             (with-focus [:c] (fn [state]
+                                                (-> state
+                                                    (update-app assoc :d 0)
+                                                    (with-unfocus update-app assoc :e 2))))
+                             (update-app assoc :d 2)
+                             (update-db assoc :the-db :wins))))))
 
 (defn ev
   ([ev-type]
@@ -60,8 +57,8 @@
 
 (defprotocol IContext
   (send! [_ ev])
-  (nest [_ ev])
-  (-narrow [_ ks]))
+  (wrap-ev [_ ev])
+  (-focus [_ ks]))
 
 (defrecord Context [app db]
   IContext
@@ -88,15 +85,15 @@
 
               (::cmds (meta new-state)))))
 
-  (nest [{:keys [::ev-stack] :as ctx} ev]
+  (wrap-ev [{:keys [::ev-stack] :as ctx} ev]
     (-> ctx
         (update ::ev-stack #(cons ev %))))
 
-  (-narrow [ctx ks]
+  (-focus [ctx ks]
     (update ctx :app get-in ks)))
 
-(defn narrow [ctx & ks]
-  (-narrow ctx ks))
+(defn focus [ctx & ks]
+  (-focus ctx ks))
 
 (defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
   event-type)
