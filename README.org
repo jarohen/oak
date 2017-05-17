@@ -1,0 +1,4 @@
+* Oak
+A ClojureScript library to structure single-page apps - taking inspiration from the Elm Architecture
+
+Currently in early development. Check out the TodoMVC implementation for an idea of how it might work
