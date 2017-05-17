@@ -1,4 +1,22 @@
 * Oak
-A ClojureScript library to structure single-page apps - taking inspiration from the Elm Architecture
+A ClojureScript library to structure single-page Reagent apps - taking inspiration from the Elm Architecture
 
-Currently in early development. Check out the TodoMVC implementation for an idea of how it might work
+Currently in early development. Check out the TodoMVC implementation for an idea of how it might work.
+
+Thoughts so far:
+- I really like the Elm architecture - it's clean, stateless, built on vanilla
+  functional concepts, and introduces a clear structure so that it's clear where
+  each bit of code belongs
+- I also like a lot of things about CLJS - in particular: EDN/Transit, same
+  language front and back, LISP - so let's see if we can combine the two.
+- Differences to Elm:
+  - Elm elements can return messages from their on-* handlers - we have to have a side effecting call
+  - The 'Elm Way' seems to be to pass down a subset of the state to each
+    component. We split the state in two - a tree of component state (':app'),
+    and a global DB that contains data on the entities in the system.
+  - Elm seems to be moving to a way of parent-child communication that involves
+    the parent view telling the child view how to create parent-level events.
+    I'm going for a slightly different approach, whereby the parent update-fn
+    gives the child update-fn a way of updating the state. I do this so that a
+    child event has the /option/ of notifying the parent or not (rather than the
+    view way which means that the parent gets first control)
