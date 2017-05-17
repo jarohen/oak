@@ -21,14 +21,15 @@
     "Mark all as complete"]])
 
 (defn handle-toggle-all-event [{:keys [db] :as state} _]
-  (o/update-db state update :todos (fn [todos]
-                                     (let [new-status (if (every? done? (vals todos))
-                                                        :active
-                                                        :done)]
-                                       (into {}
-                                             (map (fn [[todo-id todo]]
-                                                    [todo-id (assoc todo :status new-status)]))
-                                             todos)))))
+  (-> state
+      (o/update-db update :todos (fn [todos]
+                                   (let [new-status (if (every? done? (vals todos))
+                                                      :active
+                                                      :done)]
+                                     (into {}
+                                           (map (fn [[todo-id todo]]
+                                                  [todo-id (assoc todo :status new-status)]))
+                                           todos))))))
 
 (defn new-todo [{{:keys [new-todo-label]} :app,
                  :as ctx}]
@@ -42,7 +43,8 @@
 (defmulti handle-new-todo-event o/dispatch-by-type)
 
 (defmethod handle-new-todo-event ::new-todo-changed [state {:keys [new-todo-label]}]
-  (o/update-app state assoc :new-todo-label new-todo-label))
+  (-> state
+      (o/update-app assoc :new-todo-label new-todo-label)))
 
 (defmethod handle-new-todo-event ::new-todo-submitted [{{:keys [new-todo-label]} :app, :as state} _]
   (let [{:keys [todo-id] :as todo} {:todo-id (random-uuid)
@@ -111,8 +113,8 @@
                                  (sort-by (comp s/lower-case :label)))]
       ^{:key (str todo-id)}
       [todo-item (-> ctx
-                     (o/nest (o/ev ::todo-item {:todo-id todo-id}))
-                     (o/narrow ::todo-items todo-id))
+                     (o/wrap-ev (o/ev ::todo-item {:todo-id todo-id}))
+                     (o/focus ::todo-items todo-id))
        {:todo-id todo-id}]))])
 
 (def initial-todo-list-state
@@ -126,7 +128,7 @@
 
 (defmethod handle-todo-list-event ::todo-item [state {:keys [todo-id oak/sub-event]}]
   (-> state
-      (o/update-in-state [::todo-items todo-id] handle-todo-item-event (merge sub-event {:todo-id todo-id}))))
+      (o/with-focus [::todo-items todo-id] handle-todo-item-event (merge sub-event {:todo-id todo-id}))))
 
 (defn todo-count [{:keys [db]}]
   (let [items-left (count (remove done? (vals (:todos db))))]
@@ -174,20 +176,20 @@
     [:header#header
      [:h1 "todos"]
      [new-todo (-> ctx
-                   (o/nest (o/ev ::new-todo))
-                   (o/narrow ::new-todo))]]
+                   (o/wrap-ev (o/ev ::new-todo))
+                   (o/focus ::new-todo))]]
 
     [:section.main
      [toggle-all-component (-> ctx
-                               (o/nest (o/ev ::toggle-all)))]
+                               (o/wrap-ev (o/ev ::toggle-all)))]
 
      [todo-list (-> ctx
-                    (o/nest (o/ev ::todo-list))
-                    (o/narrow ::todo-list))]]
+                    (o/wrap-ev (o/ev ::todo-list))
+                    (o/focus ::todo-list))]]
 
     [:footer.footer
      [todo-count ctx]
-     [todo-filters (-> ctx (o/narrow ::todo-list) (o/nest (o/ev ::todo-list)))]
+     [todo-filters (-> ctx (o/focus ::todo-list) (o/wrap-ev (o/ev ::todo-list)))]
      [todo-clear ctx]]]
 
    [:footer.info
@@ -197,7 +199,8 @@
 (defmulti handle-event o/dispatch-by-type)
 
 (defmethod handle-event ::new-todo [state {:keys [oak/sub-event]}]
-  (o/update-in-state state [::new-todo] handle-new-todo-event sub-event))
+  (-> state
+      (o/with-focus [::new-todo] handle-new-todo-event sub-event)))
 
 (defmethod handle-event ::clear-completed [state {:keys [oak/sub-event]}]
   (-> state
@@ -207,7 +210,8 @@
                                          todos)))))
 
 (defmethod handle-event ::todo-list [state {:keys [oak/sub-event]}]
-  (o/update-in-state state [::todo-list] handle-todo-list-event sub-event))
+  (-> state
+      (o/with-focus [::todo-list] handle-todo-list-event sub-event)))
 
 (defmethod handle-event ::toggle-all [state {:keys [oak/sub-event]}]
   (handle-toggle-all-event state sub-event))
