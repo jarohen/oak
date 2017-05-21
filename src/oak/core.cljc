@@ -43,9 +43,9 @@
   ([ev-type ev-opts]
    (merge ev-opts {:oak/event-type ev-type})))
 
-(defn with-cmds [ctx & cmds]
+(defn with-cmd [ctx cmd]
   (-> ctx
-      (vary-meta update ::cmds (fnil into []) cmds)))
+      (vary-meta update ::cmds (fnil conj []) cmd)))
 
 (defprotocol IContext
   (send! [_ ev]))
