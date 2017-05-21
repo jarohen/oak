@@ -1,6 +1,6 @@
 (ns todomvc.ui.app
-  (:require [reagent.core :as r]
-            [oak.core :as o]
+  (:require [oak.core :as o]
+            [oak.reagent :as or]
             [cljs.core.async :as a]
             [cljs-http.client :as http]
             [clojure.string :as s]
@@ -113,7 +113,7 @@
                                  (sort-by (comp s/lower-case :label)))]
       ^{:key (str todo-id)}
       [todo-item (-> ctx
-                     (o/wrap-ev (o/ev ::todo-item {:todo-id todo-id}))
+                     (o/wrap-send (o/ev ::todo-item {:todo-id todo-id}))
                      (o/focus ::todo-items todo-id))
        {:todo-id todo-id}]))])
 
@@ -176,20 +176,20 @@
     [:header#header
      [:h1 "todos"]
      [new-todo (-> ctx
-                   (o/wrap-ev (o/ev ::new-todo))
+                   (o/wrap-send (o/ev ::new-todo))
                    (o/focus ::new-todo))]]
 
     [:section.main
      [toggle-all-component (-> ctx
-                               (o/wrap-ev (o/ev ::toggle-all)))]
+                               (o/wrap-send (o/ev ::toggle-all)))]
 
      [todo-list (-> ctx
-                    (o/wrap-ev (o/ev ::todo-list))
+                    (o/wrap-send (o/ev ::todo-list))
                     (o/focus ::todo-list))]]
 
     [:footer.footer
      [todo-count ctx]
-     [todo-filters (-> ctx (o/focus ::todo-list) (o/wrap-ev (o/ev ::todo-list)))]
+     [todo-filters (-> ctx (o/focus ::todo-list) (o/wrap-send (o/ev ::todo-list)))]
      [todo-clear ctx]]]
 
    [:footer.info
@@ -216,18 +216,10 @@
 (defmethod handle-event ::toggle-all [state {:keys [oak/sub-event]}]
   (handle-toggle-all-event state sub-event))
 
-(defonce !state
-  (r/atom {:app {::todo-list initial-todo-list-state}
-           :db {}}))
-
-(defn root-ctx []
-  (o/->ctx {:handle-event handle-event
-            :!state !state}))
-
-(defn render-page! []
-  (r/render-component [(fn []
-                         [page-root (root-ctx)])]
-                      (js/document.getElementById "app")))
-
 (defn ^:export main []
-  (render-page!))
+  (or/render! {:$el (js/document.getElementById "app")
+               :component (fn [ctx]
+                            [page-root ctx])
+               :handle-ev handle-event
+               :initial-state {:app {::todo-list initial-todo-list-state}
+                               :db {}}}))

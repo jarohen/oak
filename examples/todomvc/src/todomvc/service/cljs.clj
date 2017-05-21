@@ -7,7 +7,7 @@
 
    :web-context-path "/js"
 
-   :figwheel {:client {:on-jsload "todomvc.ui.app/render-page!"}}
+   :figwheel {:client {:on-jsload "reagent.core/force-update-all"}}
 
    :dev {:main 'todomvc.ui.app
          :optimizations :none
