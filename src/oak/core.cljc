@@ -1,7 +1,4 @@
-(ns oak.core
-  (:require #?(:clj [clojure.core.async :as a :refer [go go-loop]]
-               :cljs [cljs.core.async :as a]))
-  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]])))
+(ns oak.core)
 
 (defn update-app [{:keys [app db] :as state} f & args]
   (apply update state :app f args))
@@ -35,73 +32,55 @@
                    :ks ks}
                   more-stack)}))
 
-(comment
-  (-> {:app {:a {:b 1}}, :db {:the-db :is-cool}, :stack ()}
-      (with-focus [:a] (fn [state]
-                         (-> state
-                             (with-focus [:c] (fn [state]
-                                                (-> state
-                                                    (update-app assoc :d 0)
-                                                    (with-unfocus update-app assoc :e 2))))
-                             (update-app assoc :d 2)
-                             (update-db assoc :the-db :wins))))))
-
 (defn ev
   ([ev-type]
    (ev ev-type {}))
   ([ev-type ev-opts]
    (merge ev-opts {:oak/event-type ev-type})))
 
-(defn with-cmds [state & cmds]
-  (vary-meta state update ::cmds into cmds))
+(defn with-cmds [ctx & cmds]
+  (-> ctx
+      (vary-meta update ::cmds (fnil into []) cmds)))
 
 (defprotocol IContext
-  (send! [_ ev])
-  (wrap-ev [_ ev])
-  (-focus [_ ks]))
+  (send! [_ ev]))
+
+(defn handle-cmds! [ctx]
+  (doseq [cmd (::cmds (meta ctx))]
+    (cmd (fn [ev]
+           (send! ctx ev)))))
+
+(defn wrap-send [ctx ev]
+  (-> ctx
+      (vary-meta update ::ev-stack #(cons ev %))))
+
+(defn- nest-ev [ev ev-stack]
+  (reduce (fn [sub-event ev]
+            (merge ev {:oak/sub-event sub-event}))
+          ev
+          ev-stack))
+
+(defn focus [ctx & ks]
+  (update ctx :app get-in ks))
 
 (defrecord Context [app db]
   IContext
-  (send! [{:keys [::!state ::handle-event ::ev-stack] :as ctx} ev]
-    (let [new-state (swap! !state (fn [state]
-                                    (handle-event (-> state
-                                                      (vary-meta assoc ::cmds #{}))
-                                                  (reduce (fn [sub-event ev]
-                                                            (merge ev {:oak/sub-event sub-event}))
-                                                          ev
-                                                          ev-stack))))]
-      (reduce (fn [<ctx cmd]
-                (go
-                  (let [ctx (a/<! <ctx)]
-                    (if-let [<ch (when cmd (cmd))]
-                      (loop [ctx ctx]
-                        (if-let [ev (a/<! <ch)]
-                          (recur (a/<! (send! ctx ev)))
-                          ctx))
+  (send! [ctx ev]
+    (let [{:keys [::handle-ev ::ev-stack ::swap-ctx!]} (meta ctx)]
+      (doto (swap-ctx! (fn [ctx]
+                         (-> (handle-ev (-> ctx
+                                            (vary-meta assoc ::cmds []))
+                                        (nest-ev ev ev-stack))
+                             (vary-meta merge (select-keys (meta ctx) [::handle-ev ::ev-stack ::swap-ctx!])))))
+        handle-cmds!))))
 
-                      ctx))))
-              (go
-                (merge ctx (select-keys new-state [:app :db])))
+(defn ->ctx [initial-state {:keys [handle-ev swap-ctx!]}]
+  (-> (map->Context initial-state)
+      (with-meta (merge (meta initial-state)
+                        {::handle-ev handle-ev
+                         ::swap-ctx! swap-ctx!
+                         ::ev-stack (list)}))))
 
-              (::cmds (meta new-state)))))
-
-  (wrap-ev [{:keys [::ev-stack] :as ctx} ev]
-    (-> ctx
-        (update ::ev-stack #(cons ev %))))
-
-  (-focus [ctx ks]
-    (update ctx :app get-in ks)))
-
-(defn focus [ctx & ks]
-  (-focus ctx ks))
 
 (defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
   event-type)
-
-(defn ->ctx [{:keys [handle-event !state]}]
-  (let [{:keys [app db]} @!state]
-    (map->Context {::handle-event handle-event
-                   ::!state !state
-                   :app app
-                   :db db
-                   ::ev-stack (list)})))
