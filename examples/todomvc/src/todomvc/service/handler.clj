@@ -39,7 +39,6 @@
 (defn wrap-utf8 [handler]
   (fn [req]
     (when-let [resp (handler req)]
-      (prn resp)
       (-> resp
           (charset "utf-8")))))
 
