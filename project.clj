@@ -6,4 +6,6 @@
 
   :dependencies [[org.clojure/clojure "1.8.0"]]
 
-  :profiles {:dev {:dependencies [[reagent "0.6.2"]]}})
+  :profiles {:dev {:dependencies [[reagent "0.6.2"]
+                                  [org.clojure/core.async "0.3.442"]
+                                  [cljs-http "0.1.43"]]}})

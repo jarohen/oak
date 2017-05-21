@@ -89,3 +89,8 @@
 
 (defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
   event-type)
+
+(defn fmap-cmd [f cmd]
+  (fn [cb]
+    (cmd (fn [ev]
+           (cb (f ev))))))
