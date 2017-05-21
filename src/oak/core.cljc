@@ -6,31 +6,36 @@
 (defn update-db [{:keys [app db] :as state} f & args]
   (apply update state :db f args))
 
-(defn with-focus [{:keys [app db stack]} ks f & args]
+(defn with-focus [{:keys [app] :as ctx} ks f & args]
   (let [{new-app :app,
-         [{new-outer-app :outer-app} & more-stack] :stack,
-         :keys [db]} (apply f
-                            {:app (get-in app ks)
-                             :db db
-                             :stack (cons {:outer-app app, :ks ks} stack)}
-                            args)]
+         :keys [db]
+         :as new-ctx} (apply f
+                             (-> ctx
+                                 (merge {:app (get-in app ks)})
+                                 (vary-meta assoc ::stack (cons {:outer-app app, :ks ks} (::stack (meta ctx)))))
+                             args)
 
-    {:app (assoc-in new-outer-app ks new-app)
-     :db db
-     :stack more-stack}))
+        [{new-outer-app :outer-app} & more-stack] (::stack (meta new-ctx))]
 
-(defn with-unfocus [{:keys [app db stack]} f & args]
-  (let [[{:keys [outer-app ks]} & more-stack] stack
+
+    (-> (merge ctx
+               {:app (assoc-in new-outer-app ks new-app)
+                :db db})
+        (vary-meta assoc ::stack more-stack))))
+
+(defn with-unfocus [{:keys [app db] :as ctx} f & args]
+  (let [[{:keys [outer-app ks]} & more-stack] (::stack (meta ctx))
         {new-app :app, :keys [db]} (apply f
-                                          {:app (assoc-in outer-app ks app)
-                                           :db db
-                                           :stack more-stack}
+                                          (-> ctx
+                                              (merge {:app (assoc-in outer-app ks app)})
+                                              (vary-meta assoc ::stack more-stack))
                                           args)]
-    {:app (get-in new-app ks)
-     :db db
-     :stack (cons {:outer-app new-app
-                   :ks ks}
-                  more-stack)}))
+    (-> ctx
+        (merge {:app (get-in new-app ks)
+                :db db})
+        (vary-meta assoc ::stack (cons {:outer-app new-app
+                                        :ks ks}
+                                       more-stack)))))
 
 (defn ev
   ([ev-type]
