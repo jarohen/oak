@@ -26,8 +26,7 @@
   (let [initial-location (browser-location router)]
     (-> ctx
         (assoc ::nav {:router router
-                      :ev ev
-                      :location initial-location})
+                      :ev ev})
         (o/with-cmd (fn [cb]
                       (cb (merge ev {:new-location initial-location}))
 
