@@ -1,41 +1,44 @@
 (ns oak.core)
 
-(defn update-app [{:keys [app db] :as state} f & args]
-  (apply update state :app f args))
-
-(defn update-db [{:keys [app db] :as state} f & args]
-  (apply update state :db f args))
+(defn update-app [{:keys [app] :as ctx} f & args]
+  (apply update ctx :app f args))
 
 (defn with-focus [{:keys [app] :as ctx} ks f & args]
-  (let [{new-app :app,
-         :keys [db]
-         :as new-ctx} (apply f
-                             (-> ctx
-                                 (merge {:app (get-in app ks)})
-                                 (vary-meta assoc ::stack (cons {:outer-app app, :ks ks} (::stack (meta ctx)))))
-                             args)
+  (let [{new-app :app, :as new-ctx} (apply f
+                                           (-> ctx
+                                               (merge {:app (get-in app ks)})
+                                               (vary-meta assoc ::stack (cons {:outer-app app, :ks ks} (::stack (meta ctx)))))
+                                           args)
 
         [{new-outer-app :outer-app} & more-stack] (::stack (meta new-ctx))]
 
 
-    (-> (merge ctx
-               {:app (assoc-in new-outer-app ks new-app)
-                :db db})
+    (-> (merge new-ctx
+               (select-keys ctx [::handle-ev ::ev-stack ::swap-ctx!])
+               {:app (assoc-in new-outer-app ks new-app)})
         (vary-meta assoc ::stack more-stack))))
 
-(defn with-unfocus [{:keys [app db] :as ctx} f & args]
+(defn with-unfocus [{:keys [app] :as ctx} f & args]
   (let [[{:keys [outer-app ks]} & more-stack] (::stack (meta ctx))
-        {new-app :app, :keys [db]} (apply f
-                                          (-> ctx
-                                              (merge {:app (assoc-in outer-app ks app)})
-                                              (vary-meta assoc ::stack more-stack))
-                                          args)]
-    (-> ctx
-        (merge {:app (get-in new-app ks)
-                :db db})
+        {new-app :app, :as new-ctx} (apply f
+                                           (-> ctx
+                                               (merge {:app (assoc-in outer-app ks app)})
+                                               (vary-meta assoc ::stack more-stack))
+                                           args)]
+    (-> (merge new-ctx
+               (select-keys ctx [::handle-ev ::ev-stack ::swap-ctx!])
+               {:app (get-in new-app ks)})
         (vary-meta assoc ::stack (cons {:outer-app new-app
                                         :ks ks}
                                        more-stack)))))
+
+(comment
+  (-> {:app {:a {:b 1}}
+       :foo :bar}
+      (with-focus [:a] (fn [new-ctx]
+                         (-> new-ctx
+                             (update-app update :b inc)
+                             (with-unfocus update-app assoc :c :bell))))))
 
 (defn ev
   ([ev-type]
@@ -68,7 +71,7 @@
 (defn focus [ctx & ks]
   (update ctx :app get-in ks))
 
-(defrecord Context [app db]
+(defrecord Context [app]
   IContext
   (send! [ctx {:keys [oak/root-ev?] :as ev}]
     (let [{:keys [::handle-ev ::ev-stack ::swap-ctx!]} (meta ctx)]
