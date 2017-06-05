@@ -70,12 +70,13 @@
 
 (defrecord Context [app db]
   IContext
-  (send! [ctx ev]
+  (send! [ctx {:keys [oak/root-ev?] :as ev}]
     (let [{:keys [::handle-ev ::ev-stack ::swap-ctx!]} (meta ctx)]
       (doto (swap-ctx! (fn [ctx]
                          (-> (handle-ev (-> ctx
                                             (vary-meta assoc ::cmds []))
-                                        (nest-ev ev ev-stack))
+                                        (-> ev
+                                            (cond-> (not root-ev?) (nest-ev ev-stack))))
                              (vary-meta merge (select-keys (meta ctx) [::handle-ev ::ev-stack ::swap-ctx!])))))
         handle-cmds!))))
 
