@@ -15,35 +15,18 @@
            {:query-params query
             :history-state (some-> js/history.state edn/read-string)})))
 
-(defn location [ctx]
-  (get-in ctx [::nav :location]))
-
 (defn location->href [ctx {:keys [handler route-params query-params] :as location}]
   (str (merge (curl/url (str js/document.origin (unparse (get-in ctx [::nav :router]) handler route-params)))
               {:query query-params})))
 
-(defn init [ctx {:keys [router ev]}]
-  (let [initial-location (browser-location router)]
-    (-> ctx
-        (assoc ::nav {:router router
-                      :ev ev})
-        (o/with-cmd (fn [cb]
-                      (cb (merge ev {:new-location initial-location}))
-
-                      (.addEventListener js/window
-                                         "popstate"
-                                         (fn [_]
-                                           (cb (merge ev {:new-location (browser-location router)})))))))))
-
 (defn nav-cmd [ctx method {:keys [history-state] :as new-location}]
   (fn [cb]
-    (let [old-location (location ctx)
-          update-location! (case method
+    (let [update-location! (case method
                              :push #(js/history.pushState %1 %2 %3)
                              :replace #(js/history.replaceState %1 %2 %3))]
       (update-location! (pr-str history-state) nil (location->href ctx new-location))
 
-      (cb (merge (get-in ctx [::nav :ev])
+      (cb (merge (get-in ctx [::nav :change-ev])
                  {:new-location new-location})))))
 
 (defn push-cmd [ctx location]
@@ -67,7 +50,8 @@
    :on-click (fn [ev]
                (when (intercept-click-event? ev)
                  (.preventDefault ev)
-                 ((push-cmd ctx location) (fn [ev] (o/send! ctx ev)))))})
+                 (o/send! ctx (o/ev ::link-clicked {:oak/root-ev? true
+                                                    :location location}))))})
 
 (defmulti handle-mount (fn [ctx ev] (get-in ev [:location :handler])))
 (defmethod handle-mount :default [ctx {:keys [location]}] ctx)
@@ -85,15 +69,30 @@
                                     (select-keys ks)
                                     (->> (into {} (remove (comp (some-fn nil? #{{} []}) val)))))))))))
 
-(defn handle-nav [ctx {:keys [new-location]}]
-  (let [old-location (location ctx)
-        remount? (not (ks= [:handler :route-params]
+(defn handle-nav [ctx {:keys [old-location new-location]}]
+  (let [remount? (not (ks= [:handler :route-params]
                            old-location new-location))
         change? (not (ks= [:handler :route-params :query-params :history-state]
                           old-location new-location))]
     (-> ctx
-        (assoc-in [::nav :location] new-location)
         (cond-> (and change? (not remount?)) (handle-change {:old-location old-location
                                                              :new-location new-location}))
         (cond-> (and remount? old-location) (handle-unmount {:location old-location}))
         (cond-> remount? (handle-mount {:location new-location})))))
+
+(defn wrap-nav [{:keys [->initial-state handle-ev] :as sys} {:keys [change-ev router]}]
+  (let [initial-loc (browser-location router)]
+    (merge (dissoc sys :->initial-state)
+           {:initial-state (-> (merge (->initial-state {:location initial-loc})
+                                      {::nav {:router router
+                                              :change-ev change-ev}})
+                               (o/with-cmd (fn [cb]
+                                             (.addEventListener js/window
+                                                                "popstate"
+                                                                (fn [_]
+                                                                  (cb (merge change-ev {:new-location (browser-location router)})))))))
+            :handle-ev (fn [ctx ev]
+                         (case (:oak/event-type ev)
+                           ::link-clicked (-> ctx
+                                              (o/with-cmd (push-cmd ctx (:location ev))))
+                           (handle-ev ctx ev)))})))
