@@ -14,7 +14,6 @@
 
 
     (-> (merge new-ctx
-               (select-keys ctx [::handle-ev ::ev-stack ::swap-ctx!])
                {:app (assoc-in new-outer-app ks new-app)})
         (vary-meta assoc ::stack more-stack))))
 
@@ -91,7 +90,7 @@
                          ::ev-stack (list)}))))
 
 
-(defn dispatch-by-type [state {:keys [oak/event-type] :as ev}]
+(defn dispatch-by-type [ctx {:keys [oak/event-type] :as ev}]
   event-type)
 
 (defn fmap-cmd [f cmd]
