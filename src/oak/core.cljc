@@ -52,11 +52,6 @@
 (defprotocol IContext
   (send! [_ ev]))
 
-(defn handle-cmds! [ctx]
-  (doseq [cmd (::cmds (meta ctx))]
-    (cmd (fn [ev]
-           (send! ctx ev)))))
-
 (defn wrap-send [ctx ev]
   (-> ctx
       (vary-meta update ::ev-stack #(cons ev %))))
@@ -67,6 +62,11 @@
           ev
           ev-stack))
 
+(defn handle-cmds! [ctx]
+  (doseq [cmd (::cmds (meta ctx))]
+    (cmd (fn [ev]
+           (send! ctx ev)))))
+
 (defn focus [ctx & ks]
   (update ctx :app get-in ks))
 
@@ -74,12 +74,12 @@
   IContext
   (send! [ctx {:keys [oak/root-ev?] :as ev}]
     (let [{:keys [::handle-ev ::ev-stack ::swap-ctx!]} (meta ctx)]
-      (doto (swap-ctx! (fn [ctx]
-                         (-> (handle-ev (-> ctx
+      (doto (-> (swap-ctx! (fn [ctx]
+                             (handle-ev (-> ctx
                                             (vary-meta assoc ::cmds []))
                                         (-> ev
-                                            (cond-> (not root-ev?) (nest-ev ev-stack))))
-                             (vary-meta merge (select-keys (meta ctx) [::handle-ev ::ev-stack ::swap-ctx!])))))
+                                            (cond-> (not root-ev?) (nest-ev ev-stack))))))
+                (vary-meta merge (select-keys (meta ctx) [::handle-ev ::ev-stack ::swap-ctx!])))
         handle-cmds!))))
 
 (defn ->ctx [initial-state {:keys [handle-ev swap-ctx!]}]
@@ -88,7 +88,6 @@
                         {::handle-ev handle-ev
                          ::swap-ctx! swap-ctx!
                          ::ev-stack (list)}))))
-
 
 (defn dispatch-by-type [ctx {:keys [oak/event-type] :as ev}]
   event-type)
