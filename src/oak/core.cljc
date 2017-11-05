@@ -65,7 +65,8 @@
 (defn handle-cmds! [ctx]
   (doseq [cmd (::cmds (meta ctx))]
     (cmd (fn [ev]
-           (send! ctx ev)))))
+           (when ev
+             (send! ctx ev))))))
 
 (defn focus [ctx & ks]
   (update ctx :app get-in ks))
