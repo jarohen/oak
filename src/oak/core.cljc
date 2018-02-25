@@ -1,99 +1,150 @@
-(ns oak.core)
+(ns oak.core
+  (:require [clojure.string :as s]
+            #?(:cljs [reagent.core :as r :include-macros true]))
+  #?(:cljs (:require-macros [oak.core])))
 
-(defn update-app [{:keys [app] :as ctx} f & args]
-  (apply update ctx :app f args))
+(def ^:private ^:dynamic *ctx* nil)
+(def ^:dynamic *app* nil)
+(def ^:dynamic *db* nil)
 
-(defn with-focus [{:keys [app] :as ctx} ks f & args]
-  (let [{new-app :app, :as new-ctx} (apply f
-                                           (-> ctx
-                                               (merge {:app (get-in app ks)})
-                                               (vary-meta assoc ::stack (cons {:outer-app app, :ks ks} (::stack (meta ctx)))))
-                                           args)
+(defmulti handle
+  (fn [state ev]
+    (:oak/event-type ev)))
 
-        [{new-outer-app :outer-app} & more-stack] (::stack (meta new-ctx))]
+(defmethod handle :default [state {:keys [oak/event-type] :as ev}]
+  #?(:cljs (js/console.warn "No handler for event-type" event-type))
+  state)
 
-
-    (-> (merge new-ctx
-               {:app (assoc-in new-outer-app ks new-app)})
-        (vary-meta assoc ::stack more-stack))))
-
-(defn with-unfocus [{:keys [app] :as ctx} f & args]
-  (let [[{:keys [outer-app ks]} & more-stack] (::stack (meta ctx))
-        {new-app :app, :as new-ctx} (apply f
-                                           (-> ctx
-                                               (merge {:app (assoc-in outer-app ks app)})
-                                               (vary-meta assoc ::stack more-stack))
-                                           args)]
-    (-> (merge new-ctx
-               (select-keys ctx [::handle-ev ::ev-stack ::swap-ctx!])
-               {:app (get-in new-app ks)})
-        (vary-meta assoc ::stack (cons {:outer-app new-app
-                                        :ks ks}
-                                       more-stack)))))
-
-(comment
-  (-> {:app {:a {:b 1}}
-       :foo :bar}
-      (with-focus [:a] (fn [new-ctx]
-                         (-> new-ctx
-                             (update-app update :b inc)
-                             (with-unfocus update-app assoc :c :bell))))))
-
-(defn ev
-  ([ev-type]
-   (ev ev-type {}))
-  ([ev-type ev-opts]
-   (merge ev-opts {:oak/event-type ev-type})))
-
-(defn with-cmd [ctx cmd]
+#_(defn with-cmd [ctx cmd]
   (-> ctx
       (vary-meta update ::cmds (fnil conj []) cmd)))
 
-(defprotocol IContext
-  (send! [_ ev]))
-
-(defn wrap-send [ctx ev]
-  (-> ctx
-      (vary-meta update ::ev-stack #(cons ev %))))
-
-(defn- nest-ev [ev ev-stack]
-  (reduce (fn [sub-event ev]
-            (merge ev {:oak/sub-event sub-event}))
-          ev
-          ev-stack))
-
-(defn handle-cmds! [ctx]
+#_(defn- handle-cmds! [ctx]
   (doseq [cmd (::cmds (meta ctx))]
     (cmd (fn [ev]
            (when ev
              (send! ctx ev))))))
 
-(defn focus [ctx & ks]
-  (update ctx :app get-in ks))
+#_(defn fmap-cmd [f cmd]
+    (fn [cb]
+      (cmd (fn [ev]
+             (cb (f ev))))))
 
-(defrecord Context [app]
-  IContext
-  (send! [ctx {:keys [oak/root-ev?] :as ev}]
-    (let [{:keys [::handle-ev ::ev-stack ::swap-ctx!]} (meta ctx)]
-      (doto (-> (swap-ctx! (fn [ctx]
-                             (handle-ev (-> ctx
-                                            (vary-meta assoc ::cmds []))
-                                        (-> ev
-                                            (cond-> (not root-ev?) (nest-ev ev-stack))))))
-                (vary-meta merge (select-keys (meta ctx) [::handle-ev ::ev-stack ::swap-ctx!])))
-        handle-cmds!))))
+(defn send! [{:oak/keys [!app !db focus]} [event-type event-args]]
+  (let [{:oak/keys [app db] :as res} (handle {:oak/app (get-in @!app focus), :oak/db @!db}
+                                             (merge (or event-args {})
+                                                    {:oak/event-type event-type}))]
+    (swap! !app (if (seq focus) #(assoc-in %1 focus %2) #(merge %1 %2)) app)
+    (reset! !db db)))
 
-(defn ->ctx [initial-state {:keys [handle-ev swap-ctx!]}]
-  (-> (map->Context initial-state)
-      (with-meta (merge (meta initial-state)
-                        {::handle-ev handle-ev
-                         ::swap-ctx! swap-ctx!
-                         ::ev-stack (list)}))))
+(def ->reagent-ev
+  (-> (fn [ev]
+        (keyword (str "on-" (name ev))))
+      memoize))
 
-(defn dispatch-by-type [ctx {:keys [oak/event-type] :as ev}]
-  event-type)
+(defn with-classes [{:keys [oak/classes] :as attrs}]
+  (-> (merge attrs
+             (when classes
+               {:class (s/join " " (into #{} (comp (keep identity) (map name)) classes))}))
+      (dissoc :oak/classes)))
 
-(defn fmap-cmd [f cmd]
-  (fn [cb]
-    (cmd (fn [ev]
-           (cb (f ev))))))
+(defn with-handlers [attrs ctx]
+  (-> (merge attrs
+             (->> (:oak/on attrs)
+                  (into {} (keep (fn [[dom-ev ev]]
+                                   [(->reagent-ev dom-ev) (fn [e]
+                                                            (.preventDefault e)
+                                                            (send! ctx ev))])))))
+
+      (dissoc :oak/on)))
+
+(defn with-binds [{:keys [oak/bind on-change] :as attrs} {:oak/keys [focus] :as ctx}]
+  (-> (merge attrs
+             (when bind
+               (case (:type attrs)
+                 ;; TODO more types - checkbox + radio?
+                 {:value (*app* bind)
+                  :on-change (fn [e]
+                               (.preventDefault e)
+                               (swap! (:oak/!app ctx) assoc-in ((fnil into []) focus bind) (.. e -target -value))
+
+                               (when on-change
+                                 (on-change e)))})))
+
+      (dissoc :oak/bind)))
+
+(defn with-focus [ctx focus]
+  (cond-> ctx
+    focus (update :oak/focus (fnil into []) focus)))
+
+(defn- transform-el [el ctx]
+  (letfn [(transform-el* [el]
+            (cond
+              (vector? el) (-> (let [[tag maybe-attrs & more] el]
+                                 (or (when (keyword? tag)
+                                       (when (map? maybe-attrs)
+                                         (into [tag (-> maybe-attrs
+                                                        (with-handlers ctx)
+                                                        with-classes
+                                                        (with-binds ctx))]
+                                               (mapv transform-el* more))))
+
+                                     (when (and (fn? tag)
+                                                (:oak/component? (meta tag)))
+                                       (into [tag (-> ctx (with-focus (:oak/focus (meta el))))]
+                                             (when (or maybe-attrs (seq more))
+                                               (cons maybe-attrs more))))
+
+                                     (into [] (map transform-el*) el)))
+                               (with-meta (meta el)))
+              (seq? el) (map transform-el* el)
+
+              :else el))]
+
+    (transform-el* el)))
+
+(defn- tracker [!atom focus]
+  (fn [path-or-fn]
+    (let [lookup (comp (if (fn? path-or-fn)
+                         path-or-fn
+                         #(get-in % path-or-fn))
+                       #(get-in % focus)
+                       deref)]
+      #?(:clj (lookup !atom)
+         :cljs @(r/track lookup !atom)))))
+
+(defn- reagent-class [{:keys [ctx display-name render]}]
+  (-> (merge (when display-name {:display-name display-name})
+             {:reagent-render (fn [{:oak/keys [!app !db focus] :as ctx} & params]
+                                (binding [*app* (tracker !app focus)
+                                          *db* (tracker !db [])
+                                          *ctx* ctx]
+                                  (-> (apply render ctx params)
+                                      (transform-el ctx))))})
+      #?(:cljs r/create-class)))
+
+(defn- ratom [initial-val]
+  #?(:clj (atom initial-val)
+     :cljs (r/atom initial-val)))
+
+(defn render! [{{:keys [oak/app oak/db] :as state} :state, :keys [$el component]}]
+  (let [[component-f & params] component
+        ctx {:oak/!app (ratom app)
+             :oak/!db (ratom db)}]
+    (-> (into [(reagent-class {:ctx ctx
+                               :render (fn [ctx & params]
+                                         (into [component-f ctx] params))})
+               ctx]
+              params)
+
+        #?(:cljs (r/render-component $el)))))
+
+#?(:clj
+   (defmacro defc [sym params & body]
+     `(def ~sym
+        (-> (fn ~sym [ctx# ~@params]
+              (reagent-class {:ctx ctx#
+                              :display-name (str ~(str *ns*) "/" ~(name sym))
+                              :render (fn [_# ~@params]
+                                        ~@body)}))
+            (with-meta {:oak/component? true})))))

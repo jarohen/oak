@@ -1,7 +1,7 @@
 (ns oak.nav
   (:require [oak.core :as o]
             [cemerick.url :as curl]
-            [clojure.reader :as edn])
+            [cljs.reader :as edn])
 
   (:import [goog.events BrowserEvent]))
 
