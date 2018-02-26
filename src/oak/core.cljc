@@ -15,27 +15,30 @@
   #?(:cljs (js/console.warn "No handler for event-type" event-type))
   state)
 
-#_(defn with-cmd [ctx cmd]
-  (-> ctx
+(defn with-cmd [state cmd]
+  (-> state
       (vary-meta update ::cmds (fnil conj []) cmd)))
 
-#_(defn- handle-cmds! [ctx]
-  (doseq [cmd (::cmds (meta ctx))]
+(declare send!)
+
+(defn- handle-cmds! [state ctx]
+  (doseq [cmd (::cmds (meta state))]
     (cmd (fn [ev]
            (when ev
              (send! ctx ev))))))
 
-#_(defn fmap-cmd [f cmd]
-    (fn [cb]
-      (cmd (fn [ev]
-             (cb (f ev))))))
+(defn fmap-cmd [f cmd]
+  (fn [cb]
+    (cmd (fn [ev]
+           (cb (f ev))))))
 
-(defn send! [{:oak/keys [!app !db focus]} [event-type event-args]]
-  (let [{:oak/keys [app db] :as res} (handle {:oak/app (get-in @!app focus), :oak/db @!db}
-                                             (merge (or event-args {})
-                                                    {:oak/event-type event-type}))]
+(defn send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
+  (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db}
+                                               (merge (or event-args {})
+                                                      {:oak/event-type event-type}))]
     (swap! !app (if (seq focus) #(assoc-in %1 focus %2) #(merge %1 %2)) app)
-    (reset! !db db)))
+    (reset! !db db)
+    (doto state (handle-cmds! ctx))))
 
 (def ->reagent-ev
   (-> (fn [ev]
@@ -131,6 +134,9 @@
   (let [[component-f & params] component
         ctx {:oak/!app (ratom app)
              :oak/!db (ratom db)}]
+
+    (handle-cmds! state ctx)
+
     (-> (into [(reagent-class {:ctx ctx
                                :render (fn [ctx & params]
                                          (into [component-f ctx] params))})
