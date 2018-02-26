@@ -83,7 +83,7 @@
 (defn- transform-el [el ctx]
   (letfn [(transform-el* [el]
             (cond
-              (vector? el) (-> (let [[tag maybe-attrs & more] el]
+              (vector? el) (-> (let [[tag & [maybe-attrs & more :as params]] el]
                                  (or (when (keyword? tag)
                                        (when (map? maybe-attrs)
                                          (into [tag (-> maybe-attrs
@@ -94,9 +94,7 @@
 
                                      (when (and (fn? tag)
                                                 (:oak/component? (meta tag)))
-                                       (into [tag (-> ctx (with-focus (:oak/focus (meta el))))]
-                                             (when (or maybe-attrs (seq more))
-                                               (cons maybe-attrs more))))
+                                       (into [(tag (-> ctx (with-focus (:oak/focus (meta el)))))] params))
 
                                      (into [] (map transform-el*) el)))
                                (with-meta (meta el)))
@@ -116,13 +114,13 @@
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 
-(defn- reagent-class [{:keys [ctx display-name render]}]
+(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :ctx, :keys [display-name render]}]
   (-> (merge (when display-name {:display-name display-name})
-             {:reagent-render (fn [{:oak/keys [!app !db focus] :as ctx} & params]
+             {:reagent-render (fn [& params]
                                 (binding [*app* (tracker !app focus)
                                           *db* (tracker !db [])
                                           *ctx* ctx]
-                                  (-> (apply render ctx params)
+                                  (-> (apply render params)
                                       (transform-el ctx))))})
       #?(:cljs r/create-class)))
 
@@ -138,7 +136,7 @@
     (handle-cmds! state ctx)
 
     (-> (into [(reagent-class {:ctx ctx
-                               :render (fn [ctx & params]
+                               :render (fn [& params]
                                          (into [component-f ctx] params))})
                ctx]
               params)
@@ -148,9 +146,10 @@
 #?(:clj
    (defmacro defc [sym params & body]
      `(def ~sym
-        (-> (fn ~sym [ctx# ~@params]
-              (reagent-class {:ctx ctx#
-                              :display-name (str ~(str *ns*) "/" ~(name sym))
-                              :render (fn [_# ~@params]
-                                        ~@body)}))
+        (-> (fn [ctx#]
+              (fn ~sym [~@params]
+                (reagent-class {:ctx ctx#
+                                :display-name (str ~(str *ns*) "/" ~(name sym))
+                                :render (fn [~@params]
+                                          ~@body)})))
             (with-meta {:oak/component? true})))))
