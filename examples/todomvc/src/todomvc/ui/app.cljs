@@ -166,11 +166,11 @@
       [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]]))
 
 (defn ^:export main []
-  (oak/render! {:$el (js/document.getElementById "app")
-                :state {:oak/db {:todos {:foo {:todo-id :foo
-                                               :status :active
-                                               :label "Foo"}
-                                         :bar {:todo-id :bar
-                                               :status :active
-                                               :label "Bar"}}}}
-                :component [page-root]}))
+  (oak/mount! {:$el (js/document.getElementById "app")
+               :state {:oak/db {:todos {:foo {:todo-id :foo
+                                              :status :active
+                                              :label "Foo"}
+                                        :bar {:todo-id :bar
+                                              :status :active
+                                              :label "Bar"}}}}
+               :component [page-root]}))

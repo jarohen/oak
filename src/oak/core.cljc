@@ -127,7 +127,7 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn render! [{{:keys [oak/app oak/db] :as state} :state, :keys [$el component]}]
+(defn mount! [{{:keys [oak/app oak/db] :as state} :state, :keys [$el component]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom app)
              :oak/!db (ratom db)}]
