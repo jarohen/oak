@@ -32,7 +32,7 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
-(defn send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
+(defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
   (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db}
                                                (merge (or event-args {})
                                                       {:oak/event-type event-type}))]
@@ -40,45 +40,47 @@
     (reset! !db db)
     (doto state (handle-cmds! ctx))))
 
-(def ->reagent-ev
+(def ^:private ->reagent-ev
   (-> (fn [ev]
         (keyword (str "on-" (name ev))))
       memoize))
 
-(defn with-classes [{:keys [oak/classes] :as attrs}]
+(defn- with-classes [{:keys [oak/classes] :as attrs}]
   (-> (merge attrs
              (when classes
                {:class (s/join " " (into #{} (comp (keep identity) (map name)) classes))}))
       (dissoc :oak/classes)))
 
-(defn with-handlers [attrs ctx]
+(defn- with-handlers [attrs ctx]
   (-> (merge attrs
              (->> (:oak/on attrs)
                   (into {} (keep (fn [[dom-ev ev]]
                                    [(->reagent-ev dom-ev) (fn [e]
-                                                            (.preventDefault e)
+                                                            #?(:cljs (.preventDefault e))
                                                             (send! ctx ev))])))))
 
       (dissoc :oak/on)))
 
-(defn with-binds [{:keys [oak/bind on-change] :as attrs} {:oak/keys [focus] :as ctx}]
+(defn- with-binds [{:keys [oak/bind on-change] :as attrs} {:oak/keys [focus] :as ctx}]
   (-> (merge attrs
              (when bind
-               (case (:type attrs)
-                 ;; TODO more types - checkbox + radio?
-                 {:value (*app* bind)
+               (let [[value-k ev->value] (case (:type attrs)
+                                           ;; TODO more types - checkbox + radio?
+                                           [:value #?(:clj :oak/ev-value
+                                                      :cljs #(.. % -target -value))])]
+                 {value-k (*app* bind)
                   :on-change (fn [e]
-                               (.preventDefault e)
-                               (swap! (:oak/!app ctx) assoc-in ((fnil into []) focus bind) (.. e -target -value))
+                               #?(:cljs (.preventDefault e))
+                               (swap! (:oak/!app ctx) assoc-in ((fnil into []) focus bind) (ev->value e))
 
                                (when on-change
                                  (on-change e)))})))
 
       (dissoc :oak/bind)))
 
-(defn with-focus [ctx focus]
-  (cond-> ctx
-    focus (update :oak/focus (fnil into []) focus)))
+(defn focus [el & focus]
+  (-> el
+      (vary-meta assoc :oak/focus (vec focus))))
 
 (defn- transform-el [el ctx]
   (letfn [(transform-el* [el]
@@ -94,7 +96,7 @@
 
                                      (when (and (fn? tag)
                                                 (:oak/component? (meta tag)))
-                                       (into [(tag (-> ctx (with-focus (:oak/focus (meta el)))))] params))
+                                       (into [(tag (-> ctx (update :oak/focus (fnil into []) (:oak/focus (meta el)))))] params))
 
                                      (into [] (map transform-el*) el)))
                                (with-meta (meta el)))
@@ -105,10 +107,12 @@
     (transform-el* el)))
 
 (defn- tracker [!atom focus]
-  (fn [path-or-fn]
-    (let [lookup (comp (if (fn? path-or-fn)
-                         path-or-fn
-                         #(get-in % path-or-fn))
+  (fn [& path-or-fn]
+    (let [lookup (comp (cond
+                         (fn? (first path-or-fn)) (first path-or-fn)
+                         (vector? (first path-or-fn)) #(get-in % (first path-or-fn))
+                         :else #(get-in % path-or-fn))
+
                        #(get-in % focus)
                        deref)]
       #?(:clj (lookup !atom)
@@ -137,8 +141,7 @@
 
     (-> (into [(reagent-class {:ctx ctx
                                :render (fn [& params]
-                                         (into [component-f ctx] params))})
-               ctx]
+                                         (into [component-f ctx] params))})]
               params)
 
         #?(:cljs (r/render-component $el)))))
@@ -148,8 +151,8 @@
      `(def ~sym
         (-> (fn [ctx#]
               (fn ~sym [~@params]
-                (reagent-class {:ctx ctx#
-                                :display-name (str ~(str *ns*) "/" ~(name sym))
-                                :render (fn [~@params]
-                                          ~@body)})))
+                (#'reagent-class {:ctx ctx#
+                                  :display-name (str ~(str *ns*) "/" ~(name sym))
+                                  :render (fn [~@params]
+                                            ~@body)})))
             (with-meta {:oak/component? true})))))

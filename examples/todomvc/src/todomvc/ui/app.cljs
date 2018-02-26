@@ -102,14 +102,9 @@
       (assoc-in [:oak/app :todo-filter] new-filter)))
 
 (oak/defc todo-count []
-  (let [items-left (count (remove done? (vals (oak/*db* [:todos]))))]
+  (let [items-left (oak/*db* (comp count #(remove done? %) vals :todos))]
     [:span.todo-count
-     (str items-left
-          " "
-          (if (= 1 items-left)
-            "item"
-            "items")
-          " left")]))
+     (str items-left " " (case items-left 1 "item" "items") " left")]))
 
 (oak/defc todo-filters []
   (let [link-class (fn [todo-filter-option]
