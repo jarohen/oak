@@ -21,24 +21,20 @@
              [{:oak/event-type :oak.core-test/click-event
                :foo :bar}]))))
 
-(defn fake-component [render]
-  (-> (fn [ctx]
-        (fn [& params]
-          (#'oak/reagent-class {:ctx ctx
-                                :render render})))
-      (vary-meta assoc :oak/component? true)))
+(defmacro ->component {:style/indent 2} [sym params & body]
+  (apply #'oak/->component sym params body))
 
 (t/deftest focuses-component
   (let [ctx (doto (new-ctx)
               (-> :oak/!app (swap! assoc-in [::child-focus :foo] "bar")))
-        [component & params] (#'oak/transform-el (-> [(fake-component (fn [arg]
-                                                                        [:div (oak/*local* :foo) arg]))]
+        [component & params] (#'oak/transform-el (-> [(->component child [arg]
+                                                        [:div (oak/*local* :foo) arg])
+                                                      "foo-arg"]
 
                                                      (oak/focus ::child-focus))
-                                                 ctx)
-        render (-> (apply component params) :reagent-render)]
+                                                 ctx)]
 
-    (t/is (= (render "foo-arg") [:div "bar" "foo-arg"]))))
+    (t/is (= (apply (:reagent-render component) params) [:div "bar" "foo-arg"]))))
 
 (t/deftest sends-with-focus
   (let [{:keys [oak/!app] :as ctx} (new-ctx)]
@@ -86,16 +82,29 @@
 
 (t/deftest listeners
   (let [{:keys [oak/!app] :as ctx} (-> (new-ctx) (assoc :oak/focus [:parent-focus]))
-        [component & params] (#'oak/transform-el (-> [(fake-component (fn []
-                                                                        [:div {:oak/on {:click [::child-clicked {:msg "Hello world!"}]}}]))]
+        [component & params] (#'oak/transform-el (-> [(->component child []
+                                                        [:div {:oak/on {:click [::child-clicked {:msg "Hello world!"}]}}])]
                                                      (oak/focus :child :jimmy)
                                                      (oak/listen [::child-event {:child-id :jimmy}]))
                                                  ctx)
-        on-click (-> ((-> (apply component params) :reagent-render))
+        on-click (-> (apply (:reagent-render component) params)
                      (get-in [1 :on-click]))
         {:keys [oak/app]} (on-click {})]
 
     (t/is (= app {:parent-focus {:child {:jimmy {:my-message "Hello world!"}}
                                  :child-notify {:child-id :jimmy, :msg "Hello world!"}}}))))
 
-;; TODO: listen, transient state
+(t/deftest transients
+  (let [component (->component transients []
+                    ^:oak/transient [{:keys [counter]} {:counter 0}]
+                    [:div counter])
+        {:keys [oak/!app] :as ctx} (-> (new-ctx) (assoc :oak/focus [:down-one]))
+        {:keys [component-will-mount component-will-unmount reagent-render]} (component ctx)]
+
+    (t/is (= (component-will-mount) {:down-one {:counter 0}}))
+
+    (swap! !app update :down-one assoc :foo :bar)
+
+    (t/is (= (reagent-render) [:div 0]))
+
+    (t/is (= (component-will-unmount) {:down-one {:foo :bar}}))))

@@ -34,11 +34,11 @@
         (oak/update-local assoc :new-todo-label ""))))
 
 (oak/defc new-todo []
-  #_(oak/with-transient-state [{:keys [new-todo-label]} {:new-todo-label ""}])
-  (let [{:keys [new-todo-label]} (oak/*local*)]
-    [:form {:oak/on {:submit [::new-todo-submitted {:new-todo-label new-todo-label}]}}
-     [:input.new-todo {:oak/bind [:new-todo-label]
-                       :placeholder "What needs to be done?"}]]))
+  ^:oak/transient [{:keys [new-todo-label]} {:new-todo-label ""}]
+
+  [:form {:oak/on {:submit [::new-todo-submitted {:new-todo-label new-todo-label}]}}
+   [:input.new-todo {:oak/bind [:new-todo-label]
+                     :placeholder "What needs to be done?"}]])
 
 (defmethod oak/handle ::start-editing-todo [state {:keys [todo-id]}]
   (-> state
@@ -52,9 +52,9 @@
       (oak/update-db assoc-in [:todos todo-id :label] (get-in state [:oak/local :new-label]))))
 
 (oak/defc todo-item [{:keys [todo-id]}]
-  #_(oak/with-transient-state [{:keys [editing? new-label]} {:editing? false}])
-  (let [{:keys [editing? new-label]} (oak/*local*)
-        {:keys [todo-id label status] :as todo} (oak/*db* [:todos todo-id])]
+  ^:oak/transient [{:keys [editing? new-label]} {:editing? false}]
+
+  (let [{:keys [todo-id label status] :as todo} (oak/*db* [:todos todo-id])]
     [:li {:class #{(cond
                      editing? "editing"
                      (done? todo) "completed")}}
@@ -89,7 +89,8 @@
                                  (filter (comp (case todo-filter
                                                  :all #{:done :active}
                                                  :active #{:active}
-                                                 :completed #{:done})
+                                                 :completed #{:done}
+                                                 #{:done :active})
                                                :status))
                                  (sort-by (comp s/lower-case :label)))]
       ^{:key (str todo-id)
@@ -138,26 +139,26 @@
    "Clear completed"])
 
 (oak/defc page-root []
-  #_(oak/with-transient-state [_ {:todo-filter :all}])
-  (let [todo-filter (or (oak/*local* :todo-filter) :all)]
-    [:div
-     [:section.todoapp
-      [:header#header
-       [:h1 "todos"]
-       [new-todo]]
+  ^:oak/transient [{:keys [todo-filter]} {:todo-filter :all}]
 
-      [:section.main
-       [toggle-all-component]
-       [todo-list {:todo-filter todo-filter}]]
+  [:div
+   [:section.todoapp
+    [:header#header
+     [:h1 "todos"]
+     [new-todo]]
 
-      [:footer.footer
-       [todo-count]
-       [todo-filters]
-       [todo-clear]]]
+    [:section.main
+     [toggle-all-component]
+     [todo-list {:todo-filter todo-filter}]]
 
-     [:footer.info
-      [:p "Double-click to edit a todo"]
-      [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]]))
+    [:footer.footer
+     [todo-count]
+     [todo-filters]
+     [todo-clear]]]
+
+   [:footer.info
+    [:p "Double-click to edit a todo"]
+    [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]])
 
 (defmethod oak/handle ::initialize [state _]
   (-> state

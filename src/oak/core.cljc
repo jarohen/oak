@@ -33,7 +33,9 @@
            (cb (f ev))))))
 
 (defn update-local [state f & args]
-  (apply update state :oak/local f args))
+  (update state :oak/local (fn [local]
+                             (-> (apply f local args)
+                                 (vary-meta assoc :oak/transient-keys (:oak/transient-keys (meta local)))))))
 
 (defn update-db [state f & args]
   (apply update state :oak/db f args))
@@ -155,8 +157,22 @@
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 
-(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :ctx, :keys [display-name render]}]
+(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/->transients oak/render] :as args}]
   (-> (merge (when display-name {:display-name display-name})
+             (when ->transients
+               {:component-will-mount (fn [& _]
+                                        (let [transients (->transients)]
+                                          (swap! !app (fn [app]
+                                                        (-> app
+                                                            (assoc-in-focus focus (-> (merge (get-in app focus) transients)
+                                                                                      (with-meta {:oak/transient-keys (set (keys transients))}))))))))
+
+                :component-will-unmount (fn [& _]
+                                          (swap! !app (fn [app]
+                                                        (let [local (get-in app focus)]
+                                                          (-> app
+                                                              (assoc-in-focus focus (apply dissoc local (:oak/transient-keys (meta local)))))))))})
+
              {:reagent-render (fn [& params]
                                 (binding [*local* (tracker !app focus)
                                           *db* (tracker !db [])]
@@ -174,20 +190,42 @@
                      :oak/!db (ratom {})}
               initialize-ev (doto (send! initialize-ev)))]
 
-    (-> (into [(reagent-class {:ctx ctx
-                               :render (fn [& params]
-                                         (into [component-f ctx] params))})]
+    (-> (into [(reagent-class {:oak/ctx ctx
+                               :oak/render (fn [& params]
+                                             (into [(component-f ctx)] params))})]
               params)
 
         #?(:cljs (r/render-component $el)))))
 
+(defn- parse-body-forms [body]
+  (loop [[form & more-forms :as body] body
+         res {}]
+    (if form
+      (let [m (meta form)]
+        (cond
+          (:oak/transient m) (recur more-forms {:oak/transients form})
+          :else (merge res {:body body})))
+
+      (throw (ex-info "Missing component" {})))))
+
+(defn- ->component [sym params & body]
+  (let [{:keys [oak/transients body]} (parse-body-forms body)]
+    `(let [->transients# ~(when transients
+                            `(fn []
+                               ~(second transients)))
+           render# (fn ~sym [~@params]
+                     ~@(if transients
+                         `[(let [~(first transients) (*local*)]
+                             ~@body)]
+                         body))]
+       (-> (fn [ctx#]
+             (#'reagent-class {:oak/ctx ctx#
+                               :oak/->transients ->transients#
+                               :display-name ~(str (str *ns*) "/" (name sym))
+                               :oak/render render#}))
+           (with-meta {:oak/component? true})))))
+
 #?(:clj
    (defmacro defc [sym params & body]
      `(def ~sym
-        (-> (fn [ctx#]
-              (fn ~sym [~@params]
-                (#'reagent-class {:ctx ctx#
-                                  :display-name (str ~(str *ns*) "/" ~(name sym))
-                                  :render (fn [~@params]
-                                            ~@body)})))
-            (with-meta {:oak/component? true})))))
+        ~(apply ->component sym params body))))
