@@ -21,17 +21,24 @@
              [{:oak/event-type :oak.core-test/click-event
                :foo :bar}]))))
 
-(oak/defc focused-child-component [arg]
-  [:div (oak/*app* :foo)])
+(defn fake-component [render]
+  (-> (fn [ctx]
+        (fn [& params]
+          (#'oak/reagent-class {:ctx ctx
+                                :render render})))
+      (vary-meta assoc :oak/component? true)))
 
 (t/deftest focuses-component
   (let [ctx (doto (new-ctx)
               (-> :oak/!app (swap! assoc-in [::child-focus :foo] "bar")))
-        [component & params] (#'oak/transform-el (-> [focused-child-component :foo-arg]
+        [component & params] (#'oak/transform-el (-> [(fake-component (fn [arg]
+                                                                        [:div (oak/*app* :foo) arg]))]
+
                                                      (oak/focus ::child-focus))
                                                  ctx)
         render (-> (apply component params) :reagent-render)]
-    (t/is (= (second (render :foo-arg)) "bar"))))
+
+    (t/is (= (render "foo-arg") [:div "bar" "foo-arg"]))))
 
 (t/deftest sends-with-focus
   (let [{:keys [oak/!app] :as ctx} (new-ctx)]
@@ -43,7 +50,7 @@
            ::focus {::evs [{:focused :here, :oak/event-type ::click-event}]}})))
 
 (defmethod oak/handle ::event-with-cmd [state {:keys [cmd]}]
-  (-> state (assoc :oak/app {:have-cmd? true}) (oak/with-cmd cmd)))
+  (-> state (oak/update-app merge {:have-cmd? true}) (oak/with-cmd cmd)))
 
 (t/deftest handles-cmds
   (let [{:keys [oak/!app] :as ctx} (new-ctx)

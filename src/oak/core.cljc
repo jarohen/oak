@@ -32,6 +32,12 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
+(defn update-app [state f & args]
+  (apply update state :oak/app f args))
+
+(defn update-db [state f & args]
+  (apply update state :oak/db f args))
+
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
   (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db, :oak/ctx ctx}
                                                (merge (or event-args {})
@@ -96,7 +102,9 @@
 
                                      (when (and (fn? tag)
                                                 (:oak/component? (meta tag)))
-                                       (into [(tag (-> ctx (update :oak/focus (fnil into []) (:oak/focus (meta el)))))] params))
+                                       (into [(tag (-> ctx
+                                                       (update :oak/focus (fnil into []) (:oak/focus (meta el)))))]
+                                             params))
 
                                      (into [] (map transform-el*) el)))
                                (with-meta (meta el)))
