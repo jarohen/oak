@@ -20,6 +20,7 @@ button {
   appearance: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  cursor: pointer;
 }
 
 body {
@@ -33,6 +34,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-weight: 300;
+}
+
+form {
+  margin-bottom: initial;
 }
 
 :focus {
@@ -307,6 +312,7 @@ body {
   text-decoration: none;
   border: 1px solid transparent;
   border-radius: 3px;
+  cursor: pointer;
 }
 
 .filters li a:hover {
