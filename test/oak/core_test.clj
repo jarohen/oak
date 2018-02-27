@@ -41,3 +41,31 @@
     (t/is (= @!app)
           {::evs [{:bar :baz, :oak/event-type ::click-event}],
            ::focus {::evs [{:focused :here, :oak/event-type ::click-event}]}})))
+
+(defmethod oak/handle ::event-with-cmd [state {:keys [cmd]}]
+  (-> state (assoc :oak/app {:have-cmd? true}) (oak/with-cmd cmd)))
+
+(t/deftest handles-cmds
+  (let [{:keys [oak/!app] :as ctx} (new-ctx)
+        !cb (atom nil)
+        cmd (fn [cb]
+              (reset! !cb cb))]
+
+    (t/testing "simple event"
+      (#'oak/send! ctx [::event-with-cmd {:cmd cmd}])
+
+      (t/is (= @!app {:have-cmd? true}))
+      (@!cb [::click-event {:root :event}])
+      (t/is (= @!app {:have-cmd? true, ::evs [{:root :event, :oak/event-type ::click-event}]})))
+
+    (t/testing "focused event"
+      (#'oak/send! (merge ctx {:oak/focus [::focus]}) [::event-with-cmd {:cmd cmd}])
+      (t/is (= (::focus @!app) {:have-cmd? true}))
+
+      (@!cb [::click-event {:focused :event}])
+      (t/is (= @!app {:have-cmd? true
+                      ::evs [{:root :event, :oak/event-type ::click-event}]
+                      ::focus {:have-cmd? true
+                               ::evs [{:focused :event, :oak/event-type ::click-event}]}})))))
+
+;; TODO: listen, transient state

@@ -3,7 +3,6 @@
             #?(:cljs [reagent.core :as r :include-macros true]))
   #?(:cljs (:require-macros [oak.core])))
 
-(def ^:private ^:dynamic *ctx* nil)
 (def ^:dynamic *app* nil)
 (def ^:dynamic *db* nil)
 
@@ -17,12 +16,13 @@
 
 (defn with-cmd [state cmd]
   (-> state
-      (vary-meta update ::cmds (fnil conj []) cmd)))
+      (vary-meta update :oak/cmds (fnil conj []) {:oak/cmd cmd
+                                                  :oak/ctx (:oak/ctx state)})))
 
 (declare send!)
 
 (defn- handle-cmds! [state ctx]
-  (doseq [cmd (::cmds (meta state))]
+  (doseq [{:oak/keys [cmd ctx], :or {ctx ctx}} (:oak/cmds (meta state))]
     (cmd (fn [ev]
            (when ev
              (send! ctx ev))))))
@@ -33,7 +33,7 @@
            (cb (f ev))))))
 
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
-  (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db}
+  (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db, :oak/ctx ctx}
                                                (merge (or event-args {})
                                                       {:oak/event-type event-type}))]
     (swap! !app (if (seq focus) #(assoc-in %1 focus %2) #(merge %1 %2)) app)
@@ -122,8 +122,7 @@
   (-> (merge (when display-name {:display-name display-name})
              {:reagent-render (fn [& params]
                                 (binding [*app* (tracker !app focus)
-                                          *db* (tracker !db [])
-                                          *ctx* ctx]
+                                          *db* (tracker !db [])]
                                   (-> (apply render params)
                                       (transform-el ctx))))})
       #?(:cljs r/create-class)))
