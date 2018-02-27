@@ -3,7 +3,7 @@
             #?(:cljs [reagent.core :as r :include-macros true]))
   #?(:cljs (:require-macros [oak.core])))
 
-(def ^:dynamic *app* nil)
+(def ^:dynamic *local* nil)
 (def ^:dynamic *db* nil)
 
 (defmulti handle
@@ -16,13 +16,13 @@
 
 (defn with-cmd [state cmd]
   (-> state
-      (vary-meta update :oak/cmds (fnil conj []) {:oak/cmd cmd
-                                                  :oak/ctx (:oak/ctx state)})))
+      (update :oak/cmds (fnil conj []) {:oak/cmd cmd
+                                        :oak/ctx (:oak/ctx state)})))
 
 (declare send!)
 
-(defn- handle-cmds! [state ctx]
-  (doseq [{:oak/keys [cmd ctx], :or {ctx ctx}} (:oak/cmds (meta state))]
+(defn- handle-cmds! [cmds]
+  (doseq [{:oak/keys [cmd ctx]} cmds]
     (cmd (fn [ev]
            (when ev
              (send! ctx ev))))))
@@ -32,19 +32,48 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
-(defn update-app [state f & args]
-  (apply update state :oak/app f args))
+(defn update-local [state f & args]
+  (apply update state :oak/local f args))
 
 (defn update-db [state f & args]
   (apply update state :oak/db f args))
 
+(defn- assoc-in-focus [app focus local]
+  (if (seq focus)
+    (assoc-in app focus local)
+    (merge app local)))
+
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
-  (let [{:oak/keys [app db] :as state} (handle {:oak/app (get-in @!app focus), :oak/db @!db, :oak/ctx ctx}
-                                               (merge (or event-args {})
-                                                      {:oak/event-type event-type}))]
-    (swap! !app (if (seq focus) #(assoc-in %1 focus %2) #(merge %1 %2)) app)
+  (let [app @!app
+        {:oak/keys [app local db cmds] :as state} (handle #:oak{:app app, :local (get-in app focus), :db @!db, :ctx ctx}
+                                                          (merge (or event-args {})
+                                                                 {:oak/event-type event-type}))
+        app (assoc-in-focus app focus local)]
+
+    (reset! !app app)
     (reset! !db db)
-    (doto state (handle-cmds! ctx))))
+    (handle-cmds! cmds)
+    {:oak/app app, :oak/db db}))
+
+(defn notify [state [event-type event-args :as ev]]
+  (let [{:oak/keys [app db local ctx]} state]
+    (if-let [{listener-ctx :oak/ctx, [listener-event-type listener-event-args] :oak/listener-ev} (:oak/listener ctx)]
+      (let [{child-focus :oak/focus} ctx
+            {listener-focus :oak/focus} listener-ctx
+            app (assoc-in-focus app child-focus local)
+
+            {:oak/keys [local] :as state} (handle (merge state
+                                                         #:oak{:app app, :local (get-in app listener-focus), :ctx listener-ctx})
+                                                  (merge event-args
+                                                         listener-event-args
+                                                         {:oak/event-type [listener-event-type event-type]}))
+
+            app (assoc-in-focus app listener-focus local)]
+
+        (merge state #:oak{:app app
+                           :local (get-in app child-focus)}))
+
+      state)))
 
 (def ^:private ->reagent-ev
   (-> (fn [ev]
@@ -74,7 +103,7 @@
                                            ;; TODO more types - checkbox + radio?
                                            [:value #?(:clj :oak/ev-value
                                                       :cljs #(.. % -target -value))])]
-                 {value-k (*app* bind)
+                 {value-k (*local* bind)
                   :on-change (fn [e]
                                #?(:cljs (.preventDefault e))
                                (swap! (:oak/!app ctx) assoc-in ((fnil into []) focus bind) (ev->value e))
@@ -88,7 +117,11 @@
   (-> el
       (vary-meta assoc :oak/focus (vec focus))))
 
-(defn- transform-el [el ctx]
+(defn listen [el [event-type event-args :as ev]]
+  (-> el
+      (vary-meta assoc :oak/listener-ev ev)))
+
+(defn- transform-el [el {:keys [oak/focus] :as ctx}]
   (letfn [(transform-el* [el]
             (cond
               (vector? el) (-> (let [[tag & [maybe-attrs & more :as params]] el]
@@ -102,9 +135,12 @@
 
                                      (when (and (fn? tag)
                                                 (:oak/component? (meta tag)))
-                                       (into [(tag (-> ctx
-                                                       (update :oak/focus (fnil into []) (:oak/focus (meta el)))))]
-                                             params))
+                                       (let [{new-focus :oak/focus, listener-ev :oak/listener-ev} (meta el)]
+                                         (into [(tag (-> ctx
+                                                         (cond-> new-focus (update :oak/focus (fnil into []) new-focus))
+                                                         (cond-> listener-ev (assoc :oak/listener {:oak/listener-ev listener-ev
+                                                                                                   :oak/ctx ctx}))))]
+                                               params)))
 
                                      (into [] (map transform-el*) el)))
                                (with-meta (meta el)))
@@ -129,7 +165,7 @@
 (defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :ctx, :keys [display-name render]}]
   (-> (merge (when display-name {:display-name display-name})
              {:reagent-render (fn [& params]
-                                (binding [*app* (tracker !app focus)
+                                (binding [*local* (tracker !app focus)
                                           *db* (tracker !db [])]
                                   (-> (apply render params)
                                       (transform-el ctx))))})
@@ -139,12 +175,11 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn mount! [{{:keys [oak/app oak/db] :as state} :state, :keys [$el component]}]
+(defn mount! [{:keys [initialize-ev $el component]}]
   (let [[component-f & params] component
-        ctx {:oak/!app (ratom app)
-             :oak/!db (ratom db)}]
-
-    (handle-cmds! state ctx)
+        ctx (cond-> {:oak/!app (ratom {})
+                     :oak/!db (ratom {})}
+              initialize-ev (doto (send! initialize-ev)))]
 
     (-> (into [(reagent-class {:ctx ctx
                                :render (fn [& params]
