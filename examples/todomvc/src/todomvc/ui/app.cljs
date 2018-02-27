@@ -55,9 +55,9 @@
   #_(oak/with-transient-state [{:keys [editing? new-label]} {:editing? false}])
   (let [{:keys [editing? new-label]} (oak/*local*)
         {:keys [todo-id label status] :as todo} (oak/*db* [:todos todo-id])]
-    [:li {:oak/class #{(cond
-                         editing? :editing
-                         (done? todo) :completed)}}
+    [:li {:class #{(cond
+                     editing? "editing"
+                     (done? todo) "completed")}}
      (if editing?
        [:form {:oak/on {:submit [::stop-editing-todo {:todo-id todo-id}]}}
         [:input.edit {:oak/bind [:new-label]
@@ -108,18 +108,18 @@
 (oak/defc todo-filters []
   (let [link-class (fn [todo-filter-option]
                      (when (= (oak/*local* :todo-filter) todo-filter-option)
-                       :selected))]
+                       "selected"))]
     [:ul.filters
      [:li
-      [:a {:oak/class (link-class :all)
+      [:a {:class (link-class :all)
            :oak/on {:click [::filter-updated {:new-filter :all}]}}
        "All"]]
      [:li
-      [:a {:oak/class (link-class :active)
+      [:a {:class (link-class :active)
            :oak/on {:click [::filter-updated {:new-filter :active}]}}
        "Active"]]
      [:li
-      [:a {:oak/class (link-class :completed)
+      [:a {:class (link-class :completed)
            :oak/on {:click [::filter-updated {:new-filter :completed}]}}
        "Completed"]]]))
 

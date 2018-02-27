@@ -80,12 +80,6 @@
         (keyword (str "on-" (name ev))))
       memoize))
 
-(defn- with-classes [{:keys [oak/classes] :as attrs}]
-  (-> (merge attrs
-             (when classes
-               {:class (s/join " " (into #{} (comp (keep identity) (map name)) classes))}))
-      (dissoc :oak/classes)))
-
 (defn- with-handlers [attrs ctx]
   (-> (merge attrs
              (->> (:oak/on attrs)
@@ -129,7 +123,6 @@
                                        (when (map? maybe-attrs)
                                          (into [tag (-> maybe-attrs
                                                         (with-handlers ctx)
-                                                        with-classes
                                                         (with-binds ctx))]
                                                (mapv transform-el* more))))
 

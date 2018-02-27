@@ -17,6 +17,8 @@
                                   [com.cemerick/url "0.1.1"]
                                   [bidi "2.1.3"]
                                   [cljs-http "0.1.44"]
-                                  [reagent "0.6.2"]]}}
+                                  [reagent "0.8.0-alpha2" :exclusions [cljsjs/react]]
+                                  [cljsjs/react "16.2.0-3"]
+                                  [cljsjs/react-dom "16.2.0-3"]]}}
 
   :aliases {"dev" ["run" "-m" "todomvc.cljs"]})

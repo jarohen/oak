@@ -6,7 +6,7 @@
 
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [com.cemerick/url "0.1.1"]
-                 [reagent "0.6.2"]]
+                 [reagent "0.7.0"]]
 
   :profiles {:dev {:dependencies [[org.clojure/core.async "0.3.442"]
                                   [cljs-http "0.1.43"]
