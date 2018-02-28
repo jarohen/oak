@@ -19,9 +19,10 @@
                                            todos)))))
 
 (oak/defc toggle-all-component []
-  [:span {:oak/on {:click [::toggle-all]}}
+  [:span
    [:input.toggle-all {:type "checkbox"
-                       :checked (oak/*db* (comp #(every? done? %) vals :todos))}]
+                       :checked (oak/*db* (comp #(every? done? %) vals :todos))
+                       :oak/on {:change [::toggle-all]}}]
    [:label {:for "toggle-all"}
     "Mark all as complete"]])
 
