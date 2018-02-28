@@ -223,6 +223,7 @@
                                :oak/->transients ->transients#
                                :display-name ~(str (str *ns*) "/" (name sym))
                                :oak/render render#}))
+           memoize
            (with-meta {:oak/component? true})))))
 
 #?(:clj
