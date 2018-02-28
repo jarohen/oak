@@ -161,7 +161,7 @@
     [:p "Double-click to edit a todo"]
     [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]])
 
-(defmethod oak/handle ::initialize [state _]
+(defmethod oak/handle ::mount [state _]
   (-> state
       (oak/update-db (constantly {:todos {:foo {:todo-id :foo
                                                 :status :active
@@ -172,5 +172,5 @@
 
 (defn ^:export main []
   (oak/mount! {:$el (js/document.getElementById "app")
-               :initialize-ev [::initialize]
+               :init [::mount]
                :component [page-root]}))
