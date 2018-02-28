@@ -41,9 +41,9 @@
     (#'oak/send! ctx [::click-event {:bar :baz}])
     (#'oak/send! (merge ctx {:oak/focus [::focus]}) [::click-event {:focused :here}])
 
-    (t/is (= @!app)
-          {::evs [{:bar :baz, :oak/event-type ::click-event}],
-           ::focus {::evs [{:focused :here, :oak/event-type ::click-event}]}})))
+    (t/is (= @!app
+             {::evs [{:bar :baz, :oak/event-type ::click-event}],
+              ::focus {::evs [{:focused :here, :oak/event-type ::click-event}]}}))))
 
 (defmethod oak/handle ::event-with-cmd [state {:keys [cmd]}]
   (-> state (oak/update-local merge {:have-cmd? true}) (oak/with-cmd cmd)))

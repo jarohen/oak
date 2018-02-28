@@ -32,10 +32,12 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
+(defn assoc-local [state val]
+  (assoc state :oak/local (-> val
+                              (vary-meta assoc :oak/transient-keys (:oak/transient-keys (meta (:oak/local state)))))))
+
 (defn update-local [state f & args]
-  (update state :oak/local (fn [local]
-                             (-> (apply f local args)
-                                 (vary-meta assoc :oak/transient-keys (:oak/transient-keys (meta local)))))))
+  (assoc-local state (apply f (:oak/local state) args)))
 
 (defn update-db [state f & args]
   (apply update state :oak/db f args))
@@ -45,11 +47,14 @@
     (assoc-in app focus local)
     (merge app local)))
 
+(defn- handle* [{:oak/keys [app local db ctx]} [event-type event-args]]
+  (handle #:oak{:app app, :local local, :db db, :ctx ctx}
+          (merge (or event-args {})
+                 {:oak/event-type event-type})))
+
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
   (let [app @!app
-        {:oak/keys [app local db cmds] :as state} (handle #:oak{:app app, :local (get-in app focus), :db @!db, :ctx ctx}
-                                                          (merge (or event-args {})
-                                                                 {:oak/event-type event-type}))
+        {:oak/keys [app local db cmds] :as state} (handle* #:oak{:app app, :local (get-in app focus), :db @!db, :ctx ctx} [event-type event-args])
         app (assoc-in-focus app focus local)]
 
     (reset! !app app)
@@ -64,11 +69,8 @@
             {listener-focus :oak/focus} listener-ctx
             app (assoc-in-focus app child-focus local)
 
-            {:oak/keys [local] :as state} (handle (merge state
-                                                         #:oak{:app app, :local (get-in app listener-focus), :ctx listener-ctx})
-                                                  (merge event-args
-                                                         listener-event-args
-                                                         {:oak/event-type [listener-event-type event-type]}))
+            {:oak/keys [local] :as state} (handle* (merge state #:oak{:app app, :local (get-in app listener-focus), :ctx listener-ctx})
+                                                   [[listener-event-type event-type] (merge event-args listener-event-args)])
 
             app (assoc-in-focus app listener-focus local)]
 
@@ -151,7 +153,6 @@
                          (fn? (first path-or-fn)) (first path-or-fn)
                          (vector? (first path-or-fn)) #(get-in % (first path-or-fn))
                          :else #(get-in % path-or-fn))
-
                        #(get-in % focus)
                        deref)]
       #?(:clj (lookup !atom)
