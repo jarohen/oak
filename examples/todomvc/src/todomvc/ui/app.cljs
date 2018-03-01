@@ -174,3 +174,6 @@
 (defn ^:export main []
   (oak/mount! {:$el (js/document.getElementById "app")
                :component [page-root]}))
+
+(defn ^:export emit-str []
+  (oak/emit-str {:component [page-root]}))

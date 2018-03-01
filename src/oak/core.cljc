@@ -1,6 +1,7 @@
 (ns oak.core
   (:require [clojure.string :as s]
-            #?(:cljs [reagent.core :as r :include-macros true]))
+            #?@(:cljs [[reagent.core :as r :include-macros true]
+                       [reagent.dom.server :as rdm]]))
   #?(:cljs (:require-macros [oak.core])))
 
 (def ^:dynamic *local* nil)
@@ -203,6 +204,23 @@
               params)
 
         #?(:cljs (r/render-component $el)))))
+
+(defn emit-str [{:keys [component]}]
+  (let [[component-f & params] component
+        ctx {:oak/!app (ratom {})
+             :oak/!db (ratom {})}
+
+        html (-> (into [(reagent-class {:oak/ctx ctx
+                                        :oak/render (fn [& params]
+                                                      (into [(component-f ctx)] params))})]
+                       params)
+
+                 #?(:cljs rdm/render-to-string))]
+
+    (-> {:app (pr-str @(:oak/!app ctx))
+         :db (pr-str @(:oak/!db ctx))
+         :html html}
+        #?(:cljs clj->js))))
 
 (defn- parse-body-forms [body]
   (loop [[form & more-forms :as body] body
