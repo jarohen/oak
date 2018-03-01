@@ -1,3 +1,4 @@
 pom.xml
 /target/
 /.nrepl-port
+/nashorn_code_cache
