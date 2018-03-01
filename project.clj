@@ -8,6 +8,8 @@
                  [com.cemerick/url "0.1.1"]
                  [reagent "0.7.0"]]
 
-  :profiles {:dev {:dependencies [[org.clojure/core.async "0.3.442"]
+  :profiles {:dev {:dependencies [[org.clojure/clojurescript "1.9.946"]
+                                  [javax.xml.bind/jaxb-api "2.3.0"] ; jdk9
+                                  [org.clojure/core.async "0.3.442"]
                                   [cljs-http "0.1.43"]
                                   [bidi "2.1.1"]]}})
