@@ -192,11 +192,10 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn mount! [{:keys [$el component init]}]
+(defn mount! [{:keys [$el component]}]
   (let [[component-f & params] component
-        ctx (cond-> {:oak/!app (ratom {})
-                     :oak/!db (ratom {})}
-              init (doto (send! init)))]
+        ctx {:oak/!app (ratom {})
+             :oak/!db (ratom {})}]
 
     (-> (into [(reagent-class {:oak/ctx ctx
                                :oak/render (fn [& params]
