@@ -139,8 +139,18 @@
                                                "none")}}
    "Clear completed"])
 
+(defmethod oak/handle ::page-will-mount [state _]
+  (-> state
+      (oak/update-db (constantly {:todos {:foo {:todo-id :foo
+                                                :status :active
+                                                :label "Foo"}
+                                          :bar {:todo-id :bar
+                                                :status :active
+                                                :label "Bar"}}}))))
+
 (oak/defc page-root []
   ^:oak/transient [{:keys [todo-filter]} {:todo-filter :all}]
+  ^:oak/lifecycle {:component-will-mount [::page-will-mount]}
 
   [:div
    [:section.todoapp
@@ -161,16 +171,6 @@
     [:p "Double-click to edit a todo"]
     [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]])
 
-(defmethod oak/handle ::mount [state _]
-  (-> state
-      (oak/update-db (constantly {:todos {:foo {:todo-id :foo
-                                                :status :active
-                                                :label "Foo"}
-                                          :bar {:todo-id :bar
-                                                :status :active
-                                                :label "Bar"}}}))))
-
 (defn ^:export main []
   (oak/mount! {:$el (js/document.getElementById "app")
-               :init [::mount]
                :component [page-root]}))
