@@ -2,11 +2,11 @@
   (:require [clojure.java.io :as io])
   (:import [javax.script ScriptEngine ScriptEngineManager]))
 
-(defn eval-str
+(defn- eval-str
   ([engine s] (.eval engine s))
   ([engine s bindings] (.eval engine s bindings)))
 
-(defn eval-readable [engine res]
+(defn- eval-readable [engine res]
   (.eval engine (io/reader res)))
 
 (defn mk-engine [{:keys [output-dir output-to main optimizations]}]
@@ -33,8 +33,10 @@
                 :main 'todomvc.ui.app
                 :optimizations :none})))
 
-
-
+(defn emit-str [{[f & args] :emit-str-call, :keys [engine]}]
+  (-> engine
+      (eval-str (format "%s.%s()" (munge (namespace f)) (munge (name f))))
+      (.get "html")))
 
 (comment
   (-> foo-engine

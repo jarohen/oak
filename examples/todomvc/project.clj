@@ -6,7 +6,16 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
-  :dependencies [[org.clojure/clojure "1.9.0"]]
+  :dependencies [[org.clojure/clojure "1.9.0"]
+                 [ring/ring-core "1.6.3"]
+                 [aleph "0.4.4"]
+
+                 [me.shenfeng/mustache "1.1"]
+
+                 [cider/cider-nrepl "0.16.0"]
+
+                 [jarohen/nomad "0.9.0-20180227.165804-1"]
+                 [jarohen/bounce "0.0.1-20180302.155009-8"]]
 
   :exclusions [org.clojure/clojure org.clojure/clojurescript]
 
@@ -23,4 +32,4 @@
                                   [cljsjs/react-dom "16.2.0-3"]
                                   [cljsjs/react-dom-server "16.2.0-3"]]}}
 
-  :aliases {"dev" ["run" "-m" "todomvc.cljs"]})
+  :aliases {"dev" ["run" "-m" "todomvc.app.main"]})
