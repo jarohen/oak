@@ -101,27 +101,27 @@
         {:keys [oak/!app] :as ctx} (-> (new-ctx) (assoc :oak/focus [:down-one]))
         {:keys [component-will-mount component-will-unmount reagent-render]} (component ctx)]
 
-    (t/is (= (get-in (component-will-mount) [0 :down-one]) {:counter 0}))
+    (t/is (= {:counter 0} (get-in (component-will-mount) [:oak/app :down-one])))
 
     (swap! !app update :down-one assoc :foo :bar)
 
     (t/is (= (reagent-render) [:div 0]))
 
-    (t/is (= (get-in (component-will-unmount) [0 :down-one]) {:foo :bar}))))
+    (t/is (= {:foo :bar} (get-in (component-will-unmount) [:oak/app :down-one])))))
 
-(t/deftest lifecycles)
-(let [component (->component lifecycles []
-                  ^:oak/transient []
-                  ^:oak/lifecycle {:component-will-mount [::fake-event {:event :will-mount}]
-                                   :component-did-mount [::fake-event {:event :did-mount}]}
-                  [:div "mounted"])
+(t/deftest lifecycles
+  (let [component (->component lifecycles []
+                    ^:oak/transient []
+                    ^:oak/lifecycle {:component-will-mount [::fake-event {:event :will-mount}]
+                                     :component-did-mount [::fake-event {:event :did-mount}]}
+                    [:div "mounted"])
 
-      {:keys [oak/!app] :as ctx} (-> (new-ctx) (assoc :oak/focus [:down-one]))
-      {:keys [component-will-mount component-did-mount reagent-render]} (component ctx)]
+        {:keys [oak/!app] :as ctx} (-> (new-ctx) (assoc :oak/focus [:down-one]))
+        {:keys [component-will-mount component-did-mount reagent-render]} (component ctx)]
 
-  (t/is (= (get-in (doto (component-will-mount) prn) [0 :oak/app :down-one ::evs])
-           [{:event :will-mount, :oak/lifecycle-args nil, :oak/event-type :oak.core-test/fake-event}]))
+    (t/is (= [{:event :will-mount, :oak/lifecycle-args nil, :oak/event-type ::fake-event}]
+             (get-in (component-will-mount) [:oak/app :down-one ::evs])))
 
-  (t/is (= (get-in (component-did-mount) [0 :oak/app :down-one ::evs])
-           [{:event :will-mount, :oak/lifecycle-args nil, :oak/event-type :oak.core-test/fake-event}
-            {:event :did-mount, :oak/lifecycle-args nil, :oak/event-type :oak.core-test/fake-event}])))
+    (t/is (= (get-in (component-did-mount) [:oak/app :down-one ::evs])
+             [{:event :will-mount, :oak/lifecycle-args nil, :oak/event-type ::fake-event}
+              {:event :did-mount, :oak/lifecycle-args nil, :oak/event-type ::fake-event}]))))

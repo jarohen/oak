@@ -167,20 +167,24 @@
     (-> (merge lifecycle-fns
                (when display-name {:display-name display-name})
                (when ->transients
-                 {:component-will-mount (juxt (fn [& _]
-                                                (let [transients (->transients)]
-                                                  (swap! !app (fn [app]
-                                                                (-> app
-                                                                    (assoc-in-focus focus (-> (merge (get-in app focus) transients)
-                                                                                              (with-meta {:oak/transient-keys (set (keys transients))}))))))))
-                                              (or (:component-will-mount lifecycle-fns) (fn [& _])))
+                 {:component-will-mount (comp second
+                                              (juxt (fn [& _]
+                                                      (let [transients (->transients)]
+                                                        (swap! !app (fn [app]
+                                                                      (-> app
+                                                                          (assoc-in-focus focus (-> (merge (get-in app focus) transients)
+                                                                                                    (with-meta {:oak/transient-keys (set (keys transients))}))))))))
+                                                    (or (:component-will-mount lifecycle-fns)
+                                                        (fn [& _] {:oak/app @!app, :oak/db @!db}))))
 
-                  :component-will-unmount (juxt (fn [& _]
-                                                  (swap! !app (fn [app]
-                                                                (let [local (get-in app focus)]
-                                                                  (-> app
-                                                                      (assoc-in-focus focus (apply dissoc local (:oak/transient-keys (meta local)))))))))
-                                                (or (:component-will-unmount lifecycle-fns) (fn [& _])))})
+                  :component-will-unmount (comp second
+                                                (juxt (fn [& _]
+                                                        (swap! !app (fn [app]
+                                                                      (let [local (get-in app focus)]
+                                                                        (-> app
+                                                                            (assoc-in-focus focus (apply dissoc local (:oak/transient-keys (meta local)))))))))
+                                                      (or (:component-will-unmount lifecycle-fns)
+                                                          (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
 
                {:reagent-render (fn [& params]
                                   (binding [*local* (tracker !app focus)
