@@ -29,10 +29,16 @@
 
 (defn- handle-cmds! [cmds]
   (doseq [{:oak/keys [cmd-type cmd-args ctx]} cmds]
-    (cmd! (merge cmd-args {:oak/cmd-type cmd-type})
-          (fn [ev]
-            (when ev
-              (send! ctx ev))))))
+    (let [{:keys [oak/cmd-handlers]} ctx]
+      ;; if cmd-handlers is provided, and there's no cmd-handler for this type,
+      ;; it's a no-op
+      (when-let [cmd! (if cmd-handlers
+                        (get cmd-handlers cmd-type)
+                        cmd!)]
+        (cmd! (merge cmd-args {:oak/cmd-type cmd-type})
+              (fn [ev]
+                (when ev
+                  (send! ctx ev))))))))
 
 (defn fmap-cmd [f cmd]
   (fn [cb]
@@ -54,10 +60,15 @@
     (assoc-in app focus local)
     (merge app local)))
 
-(defn- handle* [{:oak/keys [app local db ctx]} [event-type event-args]]
-  (handle #:oak{:app app, :local local, :db db, :ctx ctx}
-          (merge (or event-args {})
-                 {:oak/event-type event-type})))
+(defn- handle* [{:oak/keys [app local db ctx] :as state} [event-type event-args]]
+  (if-let [handle (if-let [event-handlers (:oak/event-handlers ctx)]
+                    (get event-handlers event-type)
+                    handle)]
+    (handle #:oak{:app app, :local local, :db db, :ctx ctx}
+            (merge (or event-args {})
+                   {:oak/event-type event-type}))
+
+    state))
 
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
   (let [app @!app
@@ -203,10 +214,12 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn mount! [{:keys [$el component]}]
+(defn mount! [{:keys [$el component oak/cmd-handlers oak/event-handlers]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom {})
-             :oak/!db (ratom {})}]
+             :oak/!db (ratom {})
+             :oak/cmd-handlers cmd-handlers
+             :oak/event-handlers event-handlers}]
 
     (-> (into [(reagent-class {:oak/ctx ctx
                                :oak/render (fn [& params]
@@ -215,17 +228,22 @@
 
         #?(:cljs (r/render-component $el)))))
 
-(defn emit-str [{:keys [component]}]
+(defn emit-str [{:keys [component oak/event-handlers oak/cmd-handlers]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom {})
-             :oak/!db (ratom {})}
+             :oak/!db (ratom {})
+             :oak/event-handlers event-handlers
+             :oak/cmd-handlers cmd-handlers}
 
         html (-> (into [(reagent-class {:oak/ctx ctx
                                         :oak/render (fn [& params]
                                                       (into [(component-f ctx)] params))})]
                        params)
 
-                 #?(:cljs rdm/render-to-string))]
+                 #?(:clj (as-> [{:keys [reagent-render]} & args] (let [[{render :reagent-render} & args] (apply reagent-render args)]
+                                                                   (apply render args)))
+
+                    :cljs rdm/render-to-string))]
 
     (-> {:app (pr-str @(:oak/!app ctx))
          :db (pr-str @(:oak/!db ctx))
@@ -244,26 +262,28 @@
 
       (throw (ex-info "Missing component" {})))))
 
-(defn- ->component [sym params & body]
-  (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
-    `(let [->transients# ~(when transients
-                            `(fn []
-                               ~(second transients)))
-           render# (fn ~sym [~@params]
-                     ~@(if transients
-                         `[(let [~(first transients) (*local*)]
-                             ~@body)]
-                         body))]
-       (-> (fn [ctx#]
-             (#'reagent-class {:oak/ctx ctx#
-                               :oak/->transients ->transients#
-                               :oak/lifecycles ~lifecycles
-                               :display-name ~(str (str *ns*) "/" (name sym))
-                               :oak/render render#}))
-           memoize
-           (with-meta {:oak/component? true})))))
+#?(:clj
+   (defmacro ->component {:style/indent :defn}
+     [sym params & body]
+     (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
+       `(let [->transients# ~(when transients
+                               `(fn []
+                                  ~(second transients)))
+              render# (fn ~sym [~@params]
+                        ~@(if transients
+                            `[(let [~(first transients) (*local*)]
+                                ~@body)]
+                            body))]
+          (-> (fn [ctx#]
+                (#'reagent-class {:oak/ctx ctx#
+                                  :oak/->transients ->transients#
+                                  :oak/lifecycles ~lifecycles
+                                  :display-name ~(str (str *ns*) "/" (name sym))
+                                  :oak/render render#}))
+              memoize
+              (with-meta {:oak/component? true}))))))
 
 #?(:clj
    (defmacro defc [sym params & body]
      `(def ~sym
-        ~(apply ->component sym params body))))
+        (->component ~sym ~params ~@body))))
