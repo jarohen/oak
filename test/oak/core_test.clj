@@ -46,23 +46,25 @@
               ::focus {::evs [{:focused :here, :oak/event-type ::fake-event}]}}))))
 
 (defmethod oak/handle ::event-with-cmd [state {:keys [cmd]}]
-  (-> state (oak/update-local merge {:have-cmd? true}) (oak/with-cmd cmd)))
+  (-> state (oak/update-local merge {:have-cmd? true})
+      (oak/with-cmd cmd)))
+
+(defmethod oak/cmd! ::fake-cmd [{:keys [!cb]} cb]
+  (reset! !cb cb))
 
 (t/deftest handles-cmds
   (let [{:keys [oak/!app] :as ctx} (new-ctx)
-        !cb (atom nil)
-        cmd (fn [cb]
-              (reset! !cb cb))]
+        !cb (atom nil)]
 
     (t/testing "simple event"
-      (#'oak/send! ctx [::event-with-cmd {:cmd cmd}])
+      (#'oak/send! ctx [::event-with-cmd {:cmd [::fake-cmd {:!cb !cb}]}])
 
       (t/is (= @!app {:have-cmd? true}))
       (@!cb [::fake-event {:root :event}])
       (t/is (= @!app {:have-cmd? true, ::evs [{:root :event, :oak/event-type ::fake-event}]})))
 
     (t/testing "focused event"
-      (#'oak/send! (merge ctx {:oak/focus [::focus]}) [::event-with-cmd {:cmd cmd}])
+      (#'oak/send! (merge ctx {:oak/focus [::focus]}) [::event-with-cmd {:cmd [::fake-cmd {:!cb !cb}]}])
       (t/is (= (::focus @!app) {:have-cmd? true}))
 
       (@!cb [::fake-event {:focused :event}])

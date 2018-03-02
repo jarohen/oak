@@ -7,6 +7,10 @@
 (def ^:dynamic *local* nil)
 (def ^:dynamic *db* nil)
 
+(defmulti cmd!
+  (fn [cmd cb]
+    (:oak/cmd-type cmd)))
+
 (defmulti handle
   (fn [state ev]
     (:oak/event-type ev)))
@@ -15,18 +19,20 @@
   #?(:cljs (js/console.warn "No handler for event-type" event-type))
   state)
 
-(defn with-cmd [state cmd]
+(defn with-cmd [state [cmd-type cmd-args]]
   (-> state
-      (update :oak/cmds (fnil conj []) {:oak/cmd cmd
+      (update :oak/cmds (fnil conj []) {:oak/cmd-type cmd-type
+                                        :oak/cmd-args cmd-args
                                         :oak/ctx (:oak/ctx state)})))
 
 (declare send!)
 
 (defn- handle-cmds! [cmds]
-  (doseq [{:oak/keys [cmd ctx]} cmds]
-    (cmd (fn [ev]
-           (when ev
-             (send! ctx ev))))))
+  (doseq [{:oak/keys [cmd-type cmd-args ctx]} cmds]
+    (cmd! (merge cmd-args {:oak/cmd-type cmd-type})
+          (fn [ev]
+            (when ev
+              (send! ctx ev))))))
 
 (defn fmap-cmd [f cmd]
   (fn [cb]
