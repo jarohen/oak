@@ -25,13 +25,13 @@
    :optimizations :none
    :pretty-print? true})
 
-(b/defcomponent *nashorn* #{} []
-  (ssr/mk-engine cljs-opts))
-
 (b/defcomponent *cljs* #{} []
   (-> (future
         (cljs/watch (cljs/inputs "src" "../../src") cljs-opts))
       (b/with-stop (future-cancel *cljs*))))
+
+(b/defcomponent *nashorn* #{#'*cljs*} []
+  (ssr/mk-engine cljs-opts))
 
 (deftemplate index-tpl
   (slurp (io/resource "public/index.html")))
@@ -39,7 +39,7 @@
 (def handler
   (some-fn (-> (br/make-handler ["" {"/" :root}]
                                 {:root (fn [req]
-                                         (resp/response (index-tpl {:app (ssr/emit-str {:engine *nashorn*, :emit-str-call '(todomvc.ui.app/emit-str)})})))})
+                                         (resp/response (index-tpl {:app (ssr/emit-str *nashorn* {:oak/component ['todomvc.ui.app/page-root]})})))})
                (wrap-file "target/cljs")
                (wrap-resource "public"))
 

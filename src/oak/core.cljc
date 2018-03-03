@@ -250,6 +250,22 @@
          :html html}
         #?(:cljs clj->js))))
 
+(defn from-nashorn [obj]
+  #?(:clj obj
+     :cljs (or (when (exists? js/Java.type)
+                 (cond
+                   (instance? (js/Java.type "java.util.List") obj)
+                   (into [] (map (fn [k] (from-nashorn (aget obj k)))) (range (alength obj)))
+
+                   (instance? (js/Java.type "java.util.Map") obj)
+                   (into {} (map (fn [k] [(keyword k) (from-nashorn (aget obj k))])) (js-keys obj))))
+
+               (js->clj obj))))
+
+(defn- ^:export ssr [opts]
+  (let [{:keys [component]} (from-nashorn opts)]
+    (emit-str {:oak/component component})))
+
 (defn- parse-body-forms [body]
   (loop [[form & more-forms :as body] body
          res {}]
