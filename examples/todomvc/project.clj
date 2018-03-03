@@ -15,7 +15,7 @@
                  [cider/cider-nrepl "0.16.0"]
 
                  [jarohen/nomad "0.9.0-20180227.165804-1"]
-                 [jarohen/bounce "0.0.1-20180302.155009-8"]]
+                 [jarohen/bounce "0.0.1-20180303.180015-9"]]
 
   :exclusions [org.clojure/clojure org.clojure/clojurescript]
 
