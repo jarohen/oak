@@ -148,7 +148,7 @@
                                                 :status :active
                                                 :label "Bar"}}}))))
 
-(oak/defc page-root []
+(oak/defc ^:export page-root []
   ^:oak/transient [{:keys [todo-filter]} {:todo-filter :all}]
   ^:oak/lifecycle {:component-will-mount [::page-will-mount]}
 
@@ -172,8 +172,4 @@
     [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]])
 
 (defn ^:export main []
-  (oak/mount! {:$el (js/document.getElementById "app")
-               :component [page-root]}))
-
-(defn ^:export emit-str []
-  (oak/emit-str {:component [page-root]}))
+  (oak/mount! (js/document.getElementById "app") #:oak{:component [page-root]}))

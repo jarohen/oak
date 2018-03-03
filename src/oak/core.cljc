@@ -214,7 +214,7 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn mount! [{:keys [$el component oak/cmd-handlers oak/event-handlers]}]
+(defn mount! [$el {:oak/keys [component cmd-handlers event-handlers]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom {})
              :oak/!db (ratom {})
@@ -228,7 +228,7 @@
 
         #?(:cljs (r/render-component $el)))))
 
-(defn emit-str [{:keys [component oak/event-handlers oak/cmd-handlers]}]
+(defn emit-str [{:oak/keys [component event-handlers cmd-handlers]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom {})
              :oak/!db (ratom {})
