@@ -39,7 +39,10 @@
 (def handler
   (some-fn (-> (br/make-handler ["" {"/" :root}]
                                 {:root (fn [req]
-                                         (resp/response (index-tpl {:app (ssr/emit-str *nashorn* {:oak/component ['todomvc.ui.app/page-root]})})))})
+                                         (resp/response (index-tpl {:app (ssr/emit-str {:oak/engine *nashorn*
+                                                                                        ;; TODO we'd like to not have to be explicit about this?
+                                                                                        :oak/script-src "/s/js/app.js"
+                                                                                        :oak/component ['todomvc.ui.app/page-root]})})))})
                (wrap-file "target/cljs")
                (wrap-resource "public"))
 

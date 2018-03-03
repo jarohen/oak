@@ -1,5 +1,6 @@
 (ns oak.ssr
-  (:require [clojure.java.io :as io])
+  (:require [clojure.java.io :as io]
+            [clojure.string :as s])
   (:import [javax.script Invocable ScriptEngine ScriptEngineManager]))
 
 (defn- eval-str
@@ -28,18 +29,28 @@
 
       (throw (ex-info "not implemented yet" {:optimizations optimizations})))))
 
-(defn emit-str [^Invocable engine {:oak/keys [component app db event-handlers cmd-handlers timeout-ms], :or {timeout-ms 2000}}]
-  (let [oak (eval-str engine "oak.core")
-        [component-f & args] component
-        component-f-obj (eval-str engine (format "%s.%s"
-                                                 (munge (namespace component-f))
-                                                 (munge (name component-f))))
+(defn emit-str [{:oak/keys [^Invocable engine component script-src app db event-handlers cmd-handlers timeout-ms], :or {timeout-ms 2000}}]
+  (let [[component-f & args] component
+        component-name (format "%s.%s"
+                               (munge (namespace component-f))
+                               (munge (name component-f)))
+        !job (when engine
+               (future
+                 (let [oak (eval-str engine "oak.core")
+                       component-f-obj (eval-str engine component-name)
+                       emit-str-opts (.invokeMethod engine oak "from_nashorn" (object-array [{"oak/component" (into [component-f-obj] (map pr-str args))}]))]
+                   (-> engine
+                       (.invokeMethod oak "emit_str" (object-array [emit-str-opts]))))))]
 
-        !job (future
-               (-> engine
-                   (.invokeMethod oak "ssr" (into-array [{"component" (into [component-f-obj] (map pr-str args))}]))))]
     (try
-      (let [{:strs [html app db], :keys [timeout?]} (into {} (deref !job timeout-ms {:timeout? true}))]
-        (if-not timeout?
-          html
-          nil)))))
+      (let [{:strs [html app db]} (when !job
+                                    (into {} (deref !job timeout-ms nil)))]
+        (s/join "\n" [(format "<div>%s</div>" (or html ""))
+                      "<script>window.oak_root = document.scripts[document.scripts.length - 1].previousSibling.previousSibling;</script>"
+                      (format "<script src=\"%s\" type=\"text/javascript\"></script>" script-src)
+                      (format "<script>oak.core.mount_BANG_(oak_root, oak.core.from_nashorn({\"oak/component\": [%s]}))</script>"
+                              (s/join ", " (into [component-name] (map pr-str args))))]))
+
+      (finally
+        (when !job
+          (future-cancel !job))))))

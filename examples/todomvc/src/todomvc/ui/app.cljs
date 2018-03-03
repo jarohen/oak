@@ -170,6 +170,3 @@
    [:footer.info
     [:p "Double-click to edit a todo"]
     [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]])
-
-(defn ^:export main []
-  (oak/mount! (js/document.getElementById "app") #:oak{:component [page-root]}))

@@ -214,7 +214,7 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn mount! [$el {:oak/keys [component cmd-handlers event-handlers]}]
+(defn- build-root [{:oak/keys [component event-handlers cmd-handlers]}]
   (let [[component-f & params] component
         ctx {:oak/!app (ratom {})
              :oak/!db (ratom {})
@@ -226,20 +226,17 @@
                                              (into [(component-f ctx)] params))})]
               params)
 
-        #?(:cljs (r/render-component $el)))))
+        (with-meta {:oak/ctx ctx}))))
 
-(defn emit-str [{:oak/keys [component event-handlers cmd-handlers]}]
-  (let [[component-f & params] component
-        ctx {:oak/!app (ratom {})
-             :oak/!db (ratom {})
-             :oak/event-handlers event-handlers
-             :oak/cmd-handlers cmd-handlers}
+(defn ^:export mount! [$el {:oak/keys [component event-handlers cmd-handlers] :as opts}]
+  (-> (build-root opts)
+      #?(:cljs (r/render-component $el))))
 
-        html (-> (into [(reagent-class {:oak/ctx ctx
-                                        :oak/render (fn [& params]
-                                                      (into [(component-f ctx)] params))})]
-                       params)
-
+(defn ^:export emit-str [{:oak/keys [component event-handlers cmd-handlers] :as opts}]
+  #?(:cljs (js/print opts))
+  (let [root (build-root opts)
+        ctx (:oak/ctx (meta root))
+        html (-> root
                  #?(:clj (as-> [{:keys [reagent-render]} & args] (let [[{render :reagent-render} & args] (apply reagent-render args)]
                                                                    (apply render args)))
 
@@ -250,9 +247,9 @@
          :html html}
         #?(:cljs clj->js))))
 
-(defn from-nashorn [obj]
+(defn- ^:export from-nashorn [obj]
   #?(:clj obj
-     :cljs (or (when (exists? js/Java.type)
+     :cljs (or (when (and (exists? js/Java) (exists? js/Java.type))
                  (cond
                    (instance? (js/Java.type "java.util.List") obj)
                    (into [] (map (fn [k] (from-nashorn (aget obj k)))) (range (alength obj)))
@@ -260,11 +257,10 @@
                    (instance? (js/Java.type "java.util.Map") obj)
                    (into {} (map (fn [k] [(keyword k) (from-nashorn (aget obj k))])) (js-keys obj))))
 
-               (js->clj obj))))
+               (cond
+                 (= "array" (type obj)) (vec obj))
 
-(defn- ^:export ssr [opts]
-  (let [{:keys [component]} (from-nashorn opts)]
-    (emit-str {:oak/component component})))
+               (js->clj obj :keywordize-keys true))))
 
 (defn- parse-body-forms [body]
   (loop [[form & more-forms :as body] body
