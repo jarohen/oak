@@ -1,7 +1,6 @@
 (ns oak.core
   (:require [clojure.string :as s]
-            #?@(:cljs [[reagent.core :as r :include-macros true]
-                       [reagent.dom.server :as rdm]]))
+            #?@(:cljs [[reagent.core :as r :include-macros true]]))
   #?(:cljs (:require-macros [oak.core])))
 
 (def ^:dynamic *local* nil)
@@ -232,35 +231,9 @@
   (-> (build-root opts)
       #?(:cljs (r/render-component $el))))
 
-(defn ^:export emit-str [{:oak/keys [component event-handlers cmd-handlers] :as opts}]
-  #?(:cljs (js/print opts))
-  (let [root (build-root opts)
-        ctx (:oak/ctx (meta root))
-        html (-> root
-                 #?(:clj (as-> [{:keys [reagent-render]} & args] (let [[{render :reagent-render} & args] (apply reagent-render args)]
-                                                                   (apply render args)))
-
-                    :cljs rdm/render-to-string))]
-
-    (-> {:app (pr-str @(:oak/!app ctx))
-         :db (pr-str @(:oak/!db ctx))
-         :html html}
-        #?(:cljs clj->js))))
-
-(defn- ^:export from-nashorn [obj]
-  #?(:clj obj
-     :cljs (or (when (and (exists? js/Java) (exists? js/Java.type))
-                 (cond
-                   (instance? (js/Java.type "java.util.List") obj)
-                   (into [] (map (fn [k] (from-nashorn (aget obj k)))) (range (alength obj)))
-
-                   (instance? (js/Java.type "java.util.Map") obj)
-                   (into {} (map (fn [k] [(keyword k) (from-nashorn (aget obj k))])) (js-keys obj))))
-
-               (cond
-                 (= "array" (type obj)) (vec obj))
-
-               (js->clj obj :keywordize-keys true))))
+#?(:cljs
+   (defn- ^:export js->clj* [obj]
+     (js->clj obj :keywordize-keys true)))
 
 (defn- parse-body-forms [body]
   (loop [[form & more-forms :as body] body
@@ -299,3 +272,13 @@
    (defmacro defc [sym params & body]
      `(def ~sym
         (->component ~sym ~params ~@body))))
+
+#?(:clj
+   (defn app-js [{:oak/keys [html component script-src]}]
+     (let [[component-f & args] component]
+       (s/join "\n" [(format "<div>%s</div>" (or html ""))
+                     "<script>window.oak_root = document.scripts[document.scripts.length - 1].previousSibling.previousSibling;</script>"
+                     (format "<script src=\"%s\" type=\"text/javascript\"></script>" script-src)
+                     (format "<script>oak.core.mount_BANG_(oak_root, oak.core.js__GT_clj_STAR_({\"oak/component\": [%s]}))</script>"
+                             (s/join ", " (into [(format "%s.%s" (munge (namespace component-f)) (munge (name component-f)))]
+                                                (map pr-str args))))]))))

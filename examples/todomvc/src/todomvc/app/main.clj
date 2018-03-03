@@ -1,5 +1,6 @@
 (ns todomvc.app.main
-  (:require [oak.ssr :as ssr]
+  (:require [oak.core :as oak]
+            [oak.ssr]
             [clojure.tools.nrepl.server :as nrepl]
             [cljs.build.api :as cljs]
             [bidi.bidi :as bidi]
@@ -19,19 +20,21 @@
 
 (def cljs-opts
   {:output-to "target/cljs/s/js/app.js"
-   :output-dir "target/cljs/s/js/deps"
+   :output-dir (doto "target/cljs/s/js/deps" (-> io/file io/make-parents))
    :asset-path "/s/js/deps"
    :main 'todomvc.ui.app
    :optimizations :none
-   :pretty-print? true})
+   :pretty-print true})
 
 (b/defcomponent *cljs* #{} []
+  (cljs/build (cljs/inputs "src" "../../src") cljs-opts)
+
   (-> (future
         (cljs/watch (cljs/inputs "src" "../../src") cljs-opts))
       (b/with-stop (future-cancel *cljs*))))
 
 (b/defcomponent *nashorn* #{#'*cljs*} []
-  (ssr/mk-engine cljs-opts))
+  (oak.ssr/mk-engine cljs-opts))
 
 (deftemplate index-tpl
   (slurp (io/resource "public/index.html")))
@@ -39,16 +42,17 @@
 (def handler
   (some-fn (-> (br/make-handler ["" {"/" :root}]
                                 {:root (fn [req]
-                                         (resp/response (index-tpl {:app (ssr/emit-str {:oak/engine *nashorn*
-                                                                                        ;; TODO we'd like to not have to be explicit about this?
-                                                                                        :oak/script-src "/s/js/app.js"
-                                                                                        :oak/component ['todomvc.ui.app/page-root]})})))})
+                                         (resp/response (index-tpl {:app (let [component ['todomvc.ui.app/page-root]]
+                                                                           (oak/app-js (merge {:oak/component component
+                                                                                               :oak/script-src "/s/js/app.js"}
+                                                                                              (oak.ssr/emit-str *nashorn*
+                                                                                                                {:oak/component component}))))})))})
                (wrap-file "target/cljs")
                (wrap-resource "public"))
 
            (constantly (resp/not-found "Not Found"))))
 
-(b/defcomponent *server* #{} []
+(b/defcomponent *server* #{#'*nashorn*} []
   (-> (http/start-server #'handler {:port 3000})
       (b/with-stop (.close *server*))))
 

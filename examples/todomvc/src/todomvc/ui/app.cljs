@@ -1,5 +1,6 @@
  (ns todomvc.ui.app
   (:require [oak.core :as oak :include-macros true]
+            [oak.ssr]
             [clojure.string :as s]))
 
 (enable-console-print!)
