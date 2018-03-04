@@ -1,6 +1,7 @@
 (ns oak.core
   (:require [clojure.string :as s]
-            #?@(:cljs [[reagent.core :as r :include-macros true]]))
+            #?@(:cljs [[reagent.core :as r :include-macros true]
+                       [cljs.reader :as edn]]))
   #?(:cljs (:require-macros [oak.core])))
 
 (def ^:dynamic *local* nil)
@@ -213,10 +214,10 @@
   #?(:clj (atom initial-val)
      :cljs (r/atom initial-val)))
 
-(defn- build-root [{:oak/keys [component event-handlers cmd-handlers]}]
+(defn- build-root [{:oak/keys [component event-handlers cmd-handlers app db] :or {app {}, db {}}}]
   (let [[component-f & params] component
-        ctx {:oak/!app (ratom {})
-             :oak/!db (ratom {})
+        ctx {:oak/!app (ratom app)
+             :oak/!db (ratom db)
              :oak/cmd-handlers cmd-handlers
              :oak/event-handlers event-handlers}]
 
@@ -234,6 +235,10 @@
 #?(:cljs
    (defn- ^:export js->clj* [obj]
      (js->clj obj :keywordize-keys true)))
+
+#?(:cljs
+   (defn- ^:export edn->clj* [obj]
+     (edn/read-string obj)))
 
 (defn- parse-body-forms [body]
   (loop [[form & more-forms :as body] body
@@ -278,11 +283,14 @@
         ~(->component* sym params body))))
 
 #?(:clj
-   (defn app-js [{:oak/keys [html component script-src]}]
+   (defn app-js [{:oak/keys [app db html component script-src]}]
      (let [[component-f & args] component]
        (s/join "\n" [(format "<div>%s</div>" (or html ""))
                      "<script>window.oak_root = document.scripts[document.scripts.length - 1].previousSibling.previousSibling;</script>"
                      (format "<script src=\"%s\" type=\"text/javascript\"></script>" script-src)
-                     (format "<script>oak.core.mount_BANG_(oak_root, oak.core.js__GT_clj_STAR_({\"oak/component\": [%s]}))</script>"
-                             (s/join ", " (into [(format "%s.%s" (munge (namespace component-f)) (munge (name component-f)))]
-                                                (map pr-str args))))]))))
+                     (format "<script>oak.core.mount_BANG_(oak_root, oak.core.js__GT_clj_STAR_({%s}))</script>"
+                             (s/join ", " [(format "\"oak/component\": [%s]"
+                                                   (s/join ", " (into [(format "%s.%s" (munge (namespace component-f)) (munge (name component-f)))]
+                                                                      (map pr-str args))))
+                                           (format "\"oak/app\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or app {}))))
+                                           (format "\"oak/db\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or db {}))))]))]))))

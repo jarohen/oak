@@ -1,5 +1,6 @@
 (ns oak.ssr
-  (:require #?(:clj [clojure.java.io :as io])
+  (:require #?@(:clj [[clojure.java.io :as io]
+                      [clojure.tools.reader.edn :as edn]])
             [clojure.string :as s]
             #?@(:cljs [[oak.core :refer [build-root]]
                        [reagent.dom.server :as rdm]]))
@@ -68,8 +69,8 @@
          (let [{:strs [html app db]} (when !job
                                        (into {} (deref !job timeout-ms nil)))]
            {:oak/html html
-            :oak/app app
-            :oak/db db})
+            :oak/app (edn/read-string app)
+            :oak/db (edn/read-string db)})
 
          (finally
            (when !job
