@@ -247,31 +247,35 @@
 
       (throw (ex-info "Missing component" {})))))
 
+(defn ->component* {:style/indent :defn}
+  [sym params body]
+  (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
+    `(let [->transients# ~(when transients
+                            `(fn []
+                               ~(second transients)))
+           render# (fn ~sym [~@params]
+                     ~@(if transients
+                         `[(let [~(first transients) (*local*)]
+                             ~@body)]
+                         body))]
+       (-> (fn [ctx#]
+             (#'reagent-class {:oak/ctx ctx#
+                               :oak/->transients ->transients#
+                               :oak/lifecycles ~lifecycles
+                               :display-name ~(str (str *ns*) "/" (name sym))
+                               :oak/render render#}))
+           memoize
+           (with-meta {:oak/component? true})))))
+
 #?(:clj
    (defmacro ->component {:style/indent :defn}
      [sym params & body]
-     (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
-       `(let [->transients# ~(when transients
-                               `(fn []
-                                  ~(second transients)))
-              render# (fn ~sym [~@params]
-                        ~@(if transients
-                            `[(let [~(first transients) (*local*)]
-                                ~@body)]
-                            body))]
-          (-> (fn [ctx#]
-                (#'reagent-class {:oak/ctx ctx#
-                                  :oak/->transients ->transients#
-                                  :oak/lifecycles ~lifecycles
-                                  :display-name ~(str (str *ns*) "/" (name sym))
-                                  :oak/render render#}))
-              memoize
-              (with-meta {:oak/component? true}))))))
+     (->component* sym params body)))
 
 #?(:clj
    (defmacro defc [sym params & body]
      `(def ~sym
-        (->component ~sym ~params ~@body))))
+        ~(->component* sym params body))))
 
 #?(:clj
    (defn app-js [{:oak/keys [html component script-src]}]
