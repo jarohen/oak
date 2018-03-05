@@ -45,39 +45,22 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
-(defn- assoc-in-focus [app focus local]
-  (if (seq focus)
-    (assoc-in app focus local)
-    (merge app local)))
-
 (defn- apply% [f args]
   #(apply f % args))
 
 (defn- get-focus [state]
   (get-in state [:oak/ctx :oak/focus]))
 
-(defn get-app [state]
-  (:oak/app state))
-
-(defn update-app [state f & args]
-  (update state :oak/app (apply% f args)))
-
 (defn get-local [state]
-  (get-in (get-app state) (get-focus state)))
+  (get-in (into [:oak/app] (get-focus state))))
 
 (defn assoc-local [state val]
-  (update-app state assoc-in-focus (get-focus state) val))
+  (assoc-in state (into [:oak/app] (get-focus state)) val))
 
 (defn update-local [state f & args]
-  (update-app state assoc-in-focus (get-focus state) (apply f (get-local state) args)))
+  (update-in state (into [:oak/app] (get-focus state)) (apply f (get-local state) args)))
 
-(defn get-db [state]
-  (:oak/db state))
-
-(defn update-db [state f & args]
-  (update state :oak/db (apply% f args)))
-
-(defn- handle* [{:oak/keys [app local db ctx] :as state} [event-type event-args]]
+(defn- handle* [{:oak/keys [app db ctx] :as state} [event-type event-args]]
   (if-let [handle (if-let [event-handlers (:oak/event-handlers ctx)]
                     (get event-handlers event-type)
                     handle)]
@@ -185,28 +168,27 @@
 (defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/transients oak/lifecycles oak/render] :as args}]
   (let [lifecycle-fns (->> lifecycles
                            (into {} (map (fn [[lifecycle [event-type event-args]]]
-                                           [lifecycle #(send! ctx [event-type (merge event-args {:oak/lifecycle-args %&})])]))))]
+                                           [lifecycle #(send! ctx [event-type (merge event-args {:oak/lifecycle-args %&})])]))))
+
+        update-in-focus (fn [m f & args]
+                          (if focus
+                            (apply update-in m focus f args)
+                            (apply f m args)))]
 
     (-> (merge lifecycle-fns
                (when display-name {:display-name display-name})
                (when transients
                  {:component-will-mount (comp second
                                               (juxt (fn [& _]
-                                                      (let [transients (->> transients
-                                                                            (into {} (map (fn [[k v]]
-                                                                                            [k (v)]))))]
-                                                        (swap! !app (fn [app]
-                                                                      (-> app
-                                                                          (assoc-in-focus focus (merge (get-in app focus) transients)))))))
+                                                      (swap! !app update-in-focus merge (->> transients
+                                                                                             (into {} (map (fn [[k v]]
+                                                                                                             [k (v)]))))))
                                                     (or (:component-will-mount lifecycle-fns)
                                                         (fn [& _] {:oak/app @!app, :oak/db @!db}))))
 
                   :component-will-unmount (comp second
                                                 (juxt (fn [& _]
-                                                        (swap! !app (fn [app]
-                                                                      (let [local (get-in app focus)]
-                                                                        (-> app
-                                                                            (assoc-in-focus focus (apply dissoc local (keys transients))))))))
+                                                        (swap! !app update-in-focus #(apply dissoc % (keys transients))))
                                                       (or (:component-will-unmount lifecycle-fns)
                                                           (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
 
