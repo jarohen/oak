@@ -45,35 +45,50 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
-(defn assoc-local [state val]
-  (assoc state :oak/local (-> val
-                              (vary-meta assoc :oak/transient-keys (:oak/transient-keys (meta (:oak/local state)))))))
-
-(defn update-local [state f & args]
-  (assoc-local state (apply f (:oak/local state) args)))
-
-(defn update-db [state f & args]
-  (apply update state :oak/db f args))
-
 (defn- assoc-in-focus [app focus local]
   (if (seq focus)
     (assoc-in app focus local)
     (merge app local)))
 
+(defn- apply% [f args]
+  #(apply f % args))
+
+(defn- get-focus [state]
+  (get-in state [:oak/ctx :oak/focus]))
+
+(defn get-app [state]
+  (:oak/app state))
+
+(defn update-app [state f & args]
+  (update state :oak/app (apply% f args)))
+
+(defn get-local [state]
+  (get-in (get-app state) (get-focus state)))
+
+(defn assoc-local [state val]
+  (update-app state assoc-in-focus (get-focus state) val))
+
+(defn update-local [state f & args]
+  (update-app state assoc-in-focus (get-focus state) (apply f (get-local state) args)))
+
+(defn get-db [state]
+  (:oak/db state))
+
+(defn update-db [state f & args]
+  (update state :oak/db (apply% f args)))
+
 (defn- handle* [{:oak/keys [app local db ctx] :as state} [event-type event-args]]
   (if-let [handle (if-let [event-handlers (:oak/event-handlers ctx)]
                     (get event-handlers event-type)
                     handle)]
-    (handle #:oak{:app app, :local local, :db db, :ctx ctx}
+    (handle #:oak{:app app, :db db, :ctx ctx}
             (merge (or event-args {})
                    {:oak/event-type event-type}))
 
     state))
 
 (defn- send! [{:oak/keys [!app !db focus] :as ctx} [event-type event-args]]
-  (let [app @!app
-        {:oak/keys [app local db cmds] :as state} (handle* #:oak{:app app, :local (get-in app focus), :db @!db, :ctx ctx} [event-type event-args])
-        app (assoc-in-focus app focus local)]
+  (let [{:oak/keys [app db cmds] :as state} (handle* #:oak{:app @!app, :db @!db, :ctx ctx} [event-type event-args])]
 
     (reset! !app app)
     (reset! !db db)
@@ -81,21 +96,12 @@
     {:oak/app app, :oak/db db}))
 
 (defn notify [state [event-type event-args :as ev]]
-  (let [{:oak/keys [app db local ctx]} state]
-    (if-let [{listener-ctx :oak/ctx, [listener-event-type listener-event-args] :oak/listener-ev} (:oak/listener ctx)]
-      (let [{child-focus :oak/focus} ctx
-            {listener-focus :oak/focus} listener-ctx
-            app (assoc-in-focus app child-focus local)
+  (if-let [{listener-ctx :oak/ctx, [listener-event-type listener-event-args] :oak/listener-ev} (get-in state [:oak/ctx :oak/listener])]
+    (let [{listener-focus :oak/focus} listener-ctx]
+      (handle* (merge state #:oak{:ctx listener-ctx})
+               [[listener-event-type event-type] (merge event-args listener-event-args)]))
 
-            {:oak/keys [local] :as state} (handle* (merge state #:oak{:app app, :local (get-in app listener-focus), :ctx listener-ctx})
-                                                   [[listener-event-type event-type] (merge event-args listener-event-args)])
-
-            app (assoc-in-focus app listener-focus local)]
-
-        (merge state #:oak{:app app
-                           :local (get-in app child-focus)}))
-
-      state)))
+    state))
 
 (def ^:private ->reagent-ev
   (-> (fn [ev]
@@ -176,21 +182,22 @@
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 
-(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/->transients oak/lifecycles oak/render] :as args}]
+(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/transients oak/lifecycles oak/render] :as args}]
   (let [lifecycle-fns (->> lifecycles
                            (into {} (map (fn [[lifecycle [event-type event-args]]]
                                            [lifecycle #(send! ctx [event-type (merge event-args {:oak/lifecycle-args %&})])]))))]
 
     (-> (merge lifecycle-fns
                (when display-name {:display-name display-name})
-               (when ->transients
+               (when transients
                  {:component-will-mount (comp second
                                               (juxt (fn [& _]
-                                                      (let [transients (->transients)]
+                                                      (let [transients (->> transients
+                                                                            (into {} (map (fn [[k v]]
+                                                                                            [k (v)]))))]
                                                         (swap! !app (fn [app]
                                                                       (-> app
-                                                                          (assoc-in-focus focus (-> (merge (get-in app focus) transients)
-                                                                                                    (with-meta {:oak/transient-keys (set (keys transients))}))))))))
+                                                                          (assoc-in-focus focus (merge (get-in app focus) transients)))))))
                                                     (or (:component-will-mount lifecycle-fns)
                                                         (fn [& _] {:oak/app @!app, :oak/db @!db}))))
 
@@ -199,7 +206,7 @@
                                                         (swap! !app (fn [app]
                                                                       (let [local (get-in app focus)]
                                                                         (-> app
-                                                                            (assoc-in-focus focus (apply dissoc local (:oak/transient-keys (meta local)))))))))
+                                                                            (assoc-in-focus focus (apply dissoc local (keys transients))))))))
                                                       (or (:component-will-unmount lifecycle-fns)
                                                           (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
 
@@ -252,12 +259,11 @@
 
       (throw (ex-info "Missing component" {})))))
 
-(defn ->component* {:style/indent :defn}
-  [sym params body]
+(defn ->component* {:style/indent :defn} [sym params body]
   (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
-    `(let [->transients# ~(when transients
-                            `(fn []
-                               ~(second transients)))
+    `(let [transients# ~(some->> (second transients)
+                                 (into {} (map (fn [[k v]]
+                                                 `[~k (fn [] ~v)]))))
            render# (fn ~sym [~@params]
                      ~@(if transients
                          `[(let [~(first transients) (*local*)]
@@ -265,7 +271,7 @@
                          body))]
        (-> (fn [ctx#]
              (#'reagent-class {:oak/ctx ctx#
-                               :oak/->transients ->transients#
+                               :oak/transients transients#
                                :oak/lifecycles ~lifecycles
                                :display-name ~(str (str *ns*) "/" (name sym))
                                :oak/render render#}))
