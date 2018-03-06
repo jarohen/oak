@@ -3,7 +3,8 @@
                       [clojure.tools.reader.edn :as edn]])
             [clojure.string :as s]
             #?@(:cljs [[oak.core :refer [build-root]]
-                       [reagent.dom.server :as rdm]]))
+                       [reagent.dom.server :as rdm]
+                       [cljs.reader :as edn]]))
   #?(:clj (:import [javax.script Invocable ScriptEngine ScriptEngineManager])))
 
 #?(:clj
@@ -59,9 +60,12 @@
                                   (munge (name component-f)))
            !job (when engine
                   (future
-                    (let [oak-ssr (doto (eval-str engine "oak.ssr") prn)
+                    (let [oak-ssr (eval-str engine "oak.ssr")
                           component-f-obj (eval-str engine component-name)
-                          emit-str-opts (.invokeMethod engine oak-ssr "from_nashorn" (object-array [{"oak/component" (into [component-f-obj] (map pr-str args))}]))]
+                          emit-str-opts (.invokeMethod engine oak-ssr "from_nashorn"
+                                                       (object-array [{"oak/component" (into [component-f-obj] (map pr-str args))
+                                                                       "oak/db" (pr-str db)
+                                                                       "oak/app" (pr-str app)}]))]
                       (-> engine
                           (.invokeMethod oak-ssr "emit_str" (object-array [emit-str-opts]))))))]
 
@@ -78,7 +82,9 @@
 
    :cljs
    (defn ^:export emit-str [{:oak/keys [component event-handlers cmd-handlers] :as opts}]
-     (let [root (build-root opts)
+     (let [root (build-root (-> opts
+                                (update :oak/db #(some-> % edn/read-string))
+                                (update :oak/app #(some-> % edn/read-string))))
            ctx (:oak/ctx (meta root))
            html (-> root
                     #?(:clj (as-> [{:keys [reagent-render]} & args] (let [[{render :reagent-render} & args] (apply reagent-render args)]

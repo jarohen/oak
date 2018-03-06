@@ -140,18 +140,8 @@
                                                "none")}}
    "Clear completed"])
 
-(defmethod oak/handle ::page-will-mount [state _]
-  (-> state
-      (assoc :oak/db {:todos {:foo {:todo-id :foo
-                                    :status :active
-                                    :label "Foo"}
-                              :bar {:todo-id :bar
-                                    :status :active
-                                    :label "Bar"}}})))
-
 (oak/defc ^:export page-root []
   ^:oak/transient [{:keys [todo-filter]} {:todo-filter :all}]
-  ^:oak/lifecycle {:component-will-mount [::page-will-mount]}
 
   [:div
    [:section.todoapp

@@ -42,11 +42,15 @@
 (def handler
   (some-fn (-> (br/make-handler ["" {"/" :root}]
                                 {:root (fn [req]
-                                         (resp/response (index-tpl {:app (let [component ['todomvc.ui.app/page-root]]
-                                                                           (oak/app-js (merge {:oak/component component
-                                                                                               :oak/script-src "/s/js/app.js"}
-                                                                                              (oak.ssr/emit-str *nashorn*
-                                                                                                                {:oak/component component}))))})))})
+                                         (resp/response (index-tpl {:app (let [oak-opts {:oak/component ['todomvc.ui.app/page-root]
+                                                                                         :oak/script-src "/s/js/app.js"
+                                                                                         :oak/db {:todos {:foo {:todo-id :foo
+                                                                                                                :status :active
+                                                                                                                :label "Foo"}
+                                                                                                          :bar {:todo-id :bar
+                                                                                                                :status :active
+                                                                                                                :label "Bar"}}}}]
+                                                                           (oak/app-js (merge oak-opts (oak.ssr/emit-str *nashorn* oak-opts))))})))})
                (wrap-file "target/cljs")
                (wrap-resource "public"))
 
