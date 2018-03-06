@@ -60,21 +60,26 @@
                                   (munge (name component-f)))
            !job (when engine
                   (future
-                    (let [oak-ssr (eval-str engine "oak.ssr")
-                          component-f-obj (eval-str engine component-name)
-                          emit-str-opts (.invokeMethod engine oak-ssr "from_nashorn"
-                                                       (object-array [{"oak/component" (into [component-f-obj] (map pr-str args))
-                                                                       "oak/db" (pr-str db)
-                                                                       "oak/app" (pr-str app)}]))]
-                      (-> engine
-                          (.invokeMethod oak-ssr "emit_str" (object-array [emit-str-opts]))))))]
+                    (try
+                      (let [oak-ssr (eval-str engine "oak.ssr")
+                            component-f-obj (eval-str engine component-name)
+                            emit-str-opts (.invokeMethod engine oak-ssr "from_nashorn"
+                                                         (object-array [{"oak/component" (into [component-f-obj] (map pr-str args))
+                                                                         "oak/db" (pr-str db)
+                                                                         "oak/app" (pr-str app)}]))]
+                        (-> engine
+                            (.invokeMethod oak-ssr "emit_str" (object-array [emit-str-opts]))))
+                      (catch Exception e
+                        {:oak.ssr/error e}))))]
 
        (try
-         (let [{:strs [html app db]} (when !job
-                                       (into {} (deref !job timeout-ms nil)))]
-           {:oak/html html
-            :oak/app (edn/read-string app)
-            :oak/db (edn/read-string db)})
+         (let [{:strs [html app db] :as res} (when !job
+                                               (into {} (deref !job timeout-ms nil)))]
+           (merge (when html
+                    {:oak/html html
+                     :oak/app (edn/read-string app)
+                     :oak/db (edn/read-string db)})
+                  (select-keys res [:oak.ssr/error])))
 
          (finally
            (when !job
