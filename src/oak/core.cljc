@@ -52,13 +52,13 @@
   (get-in state [:oak/ctx :oak/focus]))
 
 (defn get-local [state]
-  (get-in (into [:oak/app] (get-focus state))))
+  (get-in state (into [:oak/app] (get-focus state))))
 
 (defn assoc-local [state val]
   (assoc-in state (into [:oak/app] (get-focus state)) val))
 
 (defn update-local [state f & args]
-  (update-in state (into [:oak/app] (get-focus state)) (apply f (get-local state) args)))
+  (assoc-in state (into [:oak/app] (get-focus state)) (apply f (get-local state) args)))
 
 (defn- handle* [{:oak/keys [app db ctx] :as state} [event-type event-args]]
   (if-let [handle (if-let [event-handlers (:oak/event-handlers ctx)]
