@@ -1,5 +1,6 @@
 (ns oak.data
-  (:require [clojure.spec.alpha :as s]))
+  (:require [clojure.spec.alpha :as s])
+  #?(:cljs (:require-macros [oak.data])))
 
 (def !entities
   (atom {}))
@@ -24,10 +25,11 @@
                                                [k {:entity entity
                                                    ::cardinality cardinality}])))))))))
 
-(defmacro defentity [entity entity-spec]
-  `(do
-     (swap! !entities assoc ~entity ~(transform-entity-spec entity-spec))
-     ~entity))
+#?(:clj
+   (defmacro defentity [entity entity-spec]
+     `(do
+        (swap! !entities assoc ~entity ~(transform-entity-spec entity-spec))
+        ~entity)))
 
 (defmulti fetch-entity
   (fn [{::keys [from]} opts]
@@ -64,7 +66,11 @@
         persistent!)))
 
 (defn- parse-query [query]
-  (let [{:keys [select-spec] ::keys [from query-params]} (s/conform ::query query)]
+  (let [{:keys [select-spec] ::keys [from query-params]} (let [conformed-query (s/conform ::query query)]
+                                                           (if-not (= conformed-query ::s/invalid)
+                                                             conformed-query
+                                                             (throw (ex-info "Invalid query" {:query query
+                                                                                              :explain-data (s/explain-data ::query query)}))))]
     (reduce (fn [acc [qp-type qp]]
               (case qp-type
                 :sub-query (update acc :sub-queries (fnil conj []) qp)
@@ -148,29 +154,30 @@
 
 ;; ----------------------
 
-(s/def :james/blog-id string?)
+(comment
+  (s/def :james/blog-id string?)
 
-(s/def :james/comment-id string?)
-(s/def :james/comment-key (s/keys :req-un [:james/blog-id :james/comment-id]))
+  (s/def :james/comment-id string?)
+  (s/def :james/comment-key (s/keys :req-un [:james/blog-id :james/comment-id]))
 
-(defentity :blog
-  #::{:key :james/blog-id
-      :facets #{:content}
-      :props {:published? boolean?}
-      :joins {:comments [:comment]}})
+  (defentity :blog
+    #::{:key :james/blog-id
+        :facets #{:content}
+        :props {:published? boolean?}
+        :joins {:comments [:comment]}})
 
-(defmethod fetch-entity :blog [{::keys [select props facets joins] :as query} {}]
-  [{:james/blog-id "foo-blog"
-    :title "Foo Blog"
-    :content "Welcome to my blog!"}])
+  (defmethod fetch-entity :blog [{::keys [select props facets joins] :as query} {}]
+    [{:james/blog-id "foo-blog"
+      :title "Foo Blog"
+      :content "Welcome to my blog!"}])
 
-(defentity :comment
-  #::{:key :james/comment-key
-      :selects #{:james/blog-id}
-      :facets #{:content}
-      :joins {:blog :blog}})
+  (defentity :comment
+    #::{:key :james/comment-key
+        :selects #{:james/blog-id}
+        :facets #{:content}
+        :joins {:blog :blog}})
 
-(defmethod fetch-entity :comment [{::keys [select facets joins]} {}]
-  [{:james/comment-key #:james{:blog-id "foo-blog", :comment-id "foo-comment-1"}
-    :james/blog-id "foo-blog"
-    :content "Nice blog!"}])
+  (defmethod fetch-entity :comment [{::keys [select facets joins]} {}]
+    [{:james/comment-key #:james{:blog-id "foo-blog", :comment-id "foo-comment-1"}
+      :james/blog-id "foo-blog"
+      :content "Nice blog!"}]))

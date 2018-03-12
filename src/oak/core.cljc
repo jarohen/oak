@@ -1,5 +1,6 @@
 (ns oak.core
   (:require [clojure.string :as s]
+            [oak.data :as od]
             #?@(:cljs [[reagent.core :as r :include-macros true]
                        [cljs.reader :as edn]]))
   #?(:cljs (:require-macros [oak.core])))
@@ -45,14 +46,11 @@
     (cmd (fn [ev]
            (cb (f ev))))))
 
-(defn- apply% [f args]
-  #(apply f % args))
-
 (defn- get-focus [state]
   (get-in state [:oak/ctx :oak/focus]))
 
-(defn get-local [state]
-  (get-in state (into [:oak/app] (get-focus state))))
+(defn get-local [state & path]
+  (get-in state (into [:oak/app] (concat (get-focus state) path))))
 
 (defn assoc-local [state val]
   (assoc-in state (into [:oak/app] (get-focus state)) val))
@@ -154,16 +152,23 @@
 
     (transform-el* el)))
 
-(defn- tracker [!atom focus]
+(defn- focus-tracker [!atom focus]
   (fn [& path-or-fn]
     (let [lookup (comp (cond
                          (fn? (first path-or-fn)) (first path-or-fn)
                          (vector? (first path-or-fn)) #(get-in % (first path-or-fn))
                          :else #(get-in % path-or-fn))
-                       #(get-in % focus)
-                       deref)]
-      #?(:clj (lookup !atom)
-         :cljs @(r/track lookup !atom)))))
+                       #(get-in % focus))]
+      #?(:clj (lookup @!atom)
+         :cljs @(r/track (comp lookup deref) !atom)))))
+
+(defn- query-tracker [!atom]
+  (fn track
+    ([query] (track query identity))
+    ([query f]
+     (let [lookup (comp f #(od/query-db % query))]
+       #?(:clj (lookup @!atom)
+          :cljs @(r/track (comp lookup deref) !atom))))))
 
 (defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/transients oak/lifecycles oak/render] :as args}]
   (let [lifecycle-fns (->> lifecycles
@@ -193,8 +198,8 @@
                                                           (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
 
                {:reagent-render (fn [& params]
-                                  (binding [*local* (tracker !app focus)
-                                            *db* (tracker !db [])]
+                                  (binding [*local* (focus-tracker !app focus)
+                                            *db* (query-tracker !db)]
                                     (-> (apply render params)
                                         (transform-el ctx))))})
         #?(:cljs r/create-class))))

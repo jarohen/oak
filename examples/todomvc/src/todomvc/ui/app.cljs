@@ -1,11 +1,16 @@
  (ns todomvc.ui.app
   (:require [oak.core :as oak :include-macros true]
-            [clojure.string :as s]))
+            [oak.data :as data :include-macros true]
+            [clojure.spec.alpha :as s]
+            [clojure.string :as str]))
 
 (enable-console-print!)
 
 (defn done? [{:keys [status] :as todo}]
   (= status :done))
+
+(data/defentity :todo
+  #::data{:key :todo-id})
 
 (defmethod oak/handle ::toggle-all [state _]
   (-> state
@@ -21,7 +26,7 @@
 (oak/defc toggle-all-component []
   [:span
    [:input.toggle-all {:type "checkbox"
-                       :checked (oak/*db* (comp #(every? done? %) vals :todos))
+                       :checked (oak/*db* `(:todos []) #(every? done? %))
                        :oak/on {:change [::toggle-all]}}]
    [:label {:for "toggle-all"}
     "Mark all as complete"]])
@@ -48,14 +53,14 @@
 
 (defmethod oak/handle ::stop-editing-todo [state {:keys [todo-id]}]
   (-> state
+      (assoc-in [:oak/db :todos todo-id :label] (oak/get-local state :new-label))
       (oak/update-local (constantly {:editing? false
-                                     :new-label nil}))
-      (assoc-in [:oak/db :todos todo-id :label] (get-in state [:oak/local :new-label]))))
+                                     :new-label nil}))))
 
 (oak/defc todo-item [{:keys [todo-id]}]
   ^:oak/transient [{:keys [editing? new-label]} {:editing? false}]
 
-  (let [{:keys [todo-id label status] :as todo} (oak/*db* [:todos todo-id])]
+  (let [[{:keys [todo-id label status] :as todo}] (oak/*db* `(:todos [:todo-id ~todo-id]))]
     [:li {:class #{(cond
                      editing? "editing"
                      (done? todo) "completed")}}
@@ -63,6 +68,7 @@
        [:form {:oak/on {:submit [::stop-editing-todo {:todo-id todo-id}]}}
         [:input.edit {:oak/bind [:new-label]
                       :oak/on {:blur [::stop-editing-todo {:todo-id todo-id}]}
+                      :on-focus (fn [e] (.select (.-target e)))
                       :auto-focus true}]]
 
        [:div.view
@@ -86,14 +92,14 @@
 (oak/defc todo-list [{:keys [todo-filter]}]
   [:ul.todo-list
    (doall
-    (for [{:keys [todo-id]} (->> (vals (oak/*db* [:todos]))
+    (for [{:keys [todo-id]} (->> (oak/*db* `(:todos []))
                                  (filter (comp (case todo-filter
                                                  :all #{:done :active}
                                                  :active #{:active}
                                                  :completed #{:done}
                                                  #{:done :active})
                                                :status))
-                                 (sort-by (comp s/lower-case :label)))]
+                                 (sort-by (comp str/lower-case :label)))]
       ^{:key (str todo-id)
         :oak/focus [:items todo-id]}
       [todo-item {:todo-id todo-id}]))])
@@ -103,7 +109,7 @@
       (oak/update-local assoc :todo-filter new-filter)))
 
 (oak/defc todo-count []
-  (let [items-left (oak/*db* (comp count #(remove done? %) vals :todos))]
+  (let [items-left (count (oak/*db* `(:todos [])))]
     [:span.todo-count
      (str items-left " " (case items-left 1 "item" "items") " left")]))
 
@@ -134,7 +140,7 @@
 
 (oak/defc todo-clear []
   [:button.clear-completed {:oak/on {:click [::clear-completed]}
-                            :style {:display (if (seq (filter (comp #{:done} :status) (vals (oak/*db* [:todos]))))
+                            :style {:display (if (seq (filter (comp #{:done} :status) (oak/*db* `(:todos []))))
                                                "inline"
                                                "none")}}
    "Clear completed"])
