@@ -271,14 +271,12 @@
         ~(->component* sym params body))))
 
 #?(:clj
-   (defn app-js [{:oak/keys [app db html component script-src]}]
+   (defn app-js [{:oak/keys [app db html component]}]
      (let [[component-f & args] component]
-       (s/join "\n" [(format "<div>%s</div>" (or html ""))
-                     "<script>window.oak_root = document.scripts[document.scripts.length - 1].previousSibling.previousSibling;</script>"
-                     (format "<script src=\"%s\" type=\"text/javascript\"></script>" script-src)
-                     (format "<script>oak.core.mount_BANG_(oak_root, oak.core.js__GT_clj_STAR_({%s}))</script>"
-                             (s/join ", " [(format "\"oak/component\": [%s]"
-                                                   (s/join ", " (into [(format "%s.%s" (munge (namespace component-f)) (munge (name component-f)))]
-                                                                      (map pr-str args))))
-                                           (format "\"oak/app\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or app {}))))
-                                           (format "\"oak/db\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or db {}))))]))]))))
+       (str (format "<div>%s</div>" (or html ""))
+            (format "<script>oak.core.mount_BANG_(document.currentScript.previousSibling, oak.core.js__GT_clj_STAR_({%s}))</script>"
+                    (s/join ", " [(format "\"oak/component\": [%s]"
+                                          (s/join ", " (into [(format "%s.%s" (munge (namespace component-f)) (munge (name component-f)))]
+                                                             (map pr-str args))))
+                                  (format "\"oak/app\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or app {}))))
+                                  (format "\"oak/db\": oak.core.edn__GT_clj_STAR_(%s)" (pr-str (pr-str (or db {}))))]))))))
