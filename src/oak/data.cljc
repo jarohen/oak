@@ -10,6 +10,7 @@
 (s/def ::key (s/tuple keyword? any?))
 (s/def ::joins (s/map-of keyword? (s/or :many (s/tuple keyword?)
                                         :one keyword?)))
+(s/def ::cardinality #{:many :one})
 
 (defn transform-entity-spec [entity-spec]
   (-> (s/conform (s/keys :opt [::selects ::props ::facets ::key ::joins])
@@ -21,7 +22,7 @@
                                                                 :many (first join-opt)
                                                                 :one join-opt)]
                                                [k {:entity entity
-                                                   :cardinality cardinality}])))))))))
+                                                   ::cardinality cardinality}])))))))))
 
 (defmacro defentity [entity entity-spec]
   `(do
@@ -45,57 +46,65 @@
 
 (defmethod query-entity :blog [{::keys [select props facets joins] :as query} {}]
   {"foo-blog" {:title "Foo Blog"
-               :content "Welcome to my blog!"
-               :comments #{{:blog-id "foo-blog", :comment-id "foo-comment-1"}}}})
+               :content "Welcome to my blog!"}})
 
 (defentity :comment
   #::{:key [:comment-key :james/comment-key]
       :selects {:blog-id :james/blog-id}
       :facets #{:content}
-      :joins {:blog-id :blog}})
+      :joins {:blog :blog}})
 
 (defmethod query-entity :comment [{::keys [select facets joins]} {}]
   {{:blog-id "foo-blog", :comment-id "foo-comment-1"} {:content "Nice blog!"
                                                        :blog-id "foo-blog"}})
 
 (s/def ::query
+  ;; TODO this may be ambiguous between select-specs and join-specs?
   (s/cat ::from keyword?
          :select-spec (s/? (s/spec (s/cat :select-key keyword?
-                                          :select-vals (s/* any?))))
+                                          :select-vals (s/+ any?))))
          :opts (s/? (s/keys :opt [::props ::facets]))
-         :join-specs (s/* (s/spec ::query))))
+         :join-specs (s/* (s/spec (s/& ::query)))))
 
 (def facet-presence-kw
   (-> (fn [facet]
         (keyword (namespace facet) (str (name facet) "?")))
       memoize))
 
-(defn query [query query-opts]
-  (loop [[{::keys [from], :keys [select-spec opts join-specs] :as entity-query} & more-queries] [(s/conform ::query query)]
-         res {}]
-    (if entity-query
-      (let [{::keys [props facets]} opts
-            entity (get @!entities from)
-            query-res (query-entity (merge #::{:from from,
-                                               :props props,
-                                               :facets (into #{}
-                                                             (keep (fn [facet]
-                                                                     (when (contains? facets facet)
-                                                                       (facet-presence-kw facet))))
-                                                             (::facets entity))}
-                                           (when select-spec
-                                             {::select (mapv select-spec [:select-key :select-vals])}))
+(do
+  (defn query [query query-opts]
+    (loop [[{::keys [from], :keys [select-spec opts join-specs] :as entity-query} & more-queries] [(s/conform ::query query)]
+           res {}]
+      (if entity-query
+        (let [{::keys [props facets]} opts
+              entity (get @!entities from)
+              query-res (query-entity (merge #::{:from from,
+                                                 :props props,
+                                                 :facets (into #{}
+                                                               (keep (fn [facet]
+                                                                       (when (contains? facets facet)
+                                                                         (facet-presence-kw facet))))
+                                                               (::facets entity))}
+                                             (when select-spec
+                                               {::select (mapv select-spec [:select-key :select-vals])}))
 
-                                    query-opts)]
-        (recur (concat (for [join-spec join-specs]
-                         )
-                       more-queries)
-               (cond
-                 (map? query-res) (update res from (fn [existing-entities]
-                                                     (merge-with merge existing-entities query-res))))))
+                                      query-opts)]
+          (recur (concat (when (seq query-res)
+                           (for [{::keys [from] :as join-spec} join-specs]
+                             (let [{join-entity :entity, ::keys [cardinality]} (get-in entity [::joins from])
+                                   {[join-entity-key] ::key} (get @!entities join-entity)]
+                               (merge join-spec
+                                      {::from join-entity
+                                       ::select (case cardinality
+                                                  :many [(get-in entity [::key 0]) (into #{} (keys query-res))]
+                                                  :one [join-entity-key (into #{} (keep join-entity-key) (vals query-res))])}))))
+                         more-queries)
+                 (cond
+                   (map? query-res) (update res from (fn [existing-entities]
+                                                       (merge-with merge existing-entities query-res))))))
 
-      res)))
+        res)))
 
-(query `(:blog [:blog-id "foo-blog"]
-               #::{:props {}, :facets #{}}
-               (:comment)) {})
+  (query `(:blog [:blog-id "foo-blog"]
+                 #::{:props {}, :facets #{}}
+                 (:comments)) {}))
