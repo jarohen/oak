@@ -16,10 +16,6 @@
   (fn [state ev]
     (:oak/event-type ev)))
 
-(defmethod handle :default [state {:keys [oak/event-type] :as ev}]
-  #?(:cljs (js/console.warn "No handler for event-type" event-type))
-  state)
-
 (defn with-cmd [state [cmd-type cmd-args]]
   (-> state
       (update :oak/cmds (fnil conj []) {:oak/cmd-type cmd-type
