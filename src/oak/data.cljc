@@ -38,6 +38,9 @@
   (fn [{::keys [from]} opts]
     from))
 
+(defn ^:dynamic *fetch-entity* [query opts]
+  (fetch-entity query opts))
+
 (s/def ::query-param
   (s/or ::props (s/map-of keyword? any?)
         ::facet keyword?
@@ -111,17 +114,17 @@
          res {}]
     (if entity-query
       (let [entity (get @!entities from)
-            query-res (-> (fetch-entity (merge #::{:from from,
-                                                   :props props,
-                                                   :facets (into #{}
-                                                                 (keep (fn [facet]
-                                                                         (when (contains? facets facet)
-                                                                           (facet-presence-kw facet))))
-                                                                 (::facets entity))}
-                                               (when select-spec
-                                                 {::select (mapv select-spec [:select-key :select-vals])}))
+            query-res (-> (*fetch-entity* (merge #::{:from from,
+                                                     :props props,
+                                                     :facets (into #{}
+                                                                   (keep (fn [facet]
+                                                                           (when (contains? facets facet)
+                                                                             (facet-presence-kw facet))))
+                                                                   (::facets entity))}
+                                                 (when select-spec
+                                                   {::select (mapv select-spec [:select-key :select-vals])}))
 
-                                        query-opts)
+                                          query-opts)
                           (by-key (::key entity))
                           (->> (into {} (let [transform (apply-query entity-query)]
                                           (keep (fn [[k v]]
