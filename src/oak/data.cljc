@@ -1,5 +1,6 @@
 (ns oak.data
   (:require [clojure.spec.alpha :as s]
+            [clojure.string :as str]
             [clojure.set :as set]
             [clojure.walk :as w])
   #?(:cljs (:require-macros [oak.data])))
@@ -11,14 +12,22 @@
 (defn- ^:dynamic *entity-spec* [entity]
   (get @!entities entity))
 
-(s/def ::key keyword?)
-(s/def ::selects (s/coll-of keyword? :kind set? :into #{}))
-(s/def ::wheres (s/coll-of keyword? :kind set? :into #{}))
-(s/def ::fields (s/coll-of keyword? :kind set? :into #{}))
-(s/def ::joins (s/map-of keyword? (s/or :many (s/tuple keyword?)
-                                        :one keyword?)))
+(def keyword-ish?
+  (s/conformer (fn [o]
+                 (cond
+                   (keyword? o) o
+                   (string? o) (-> o (cond-> (str/starts-with? o ":") (subs 1)) keyword)
+                   :else ::s/invalid))))
+
+(s/def ::key keyword-ish?)
+(s/def ::selects (s/coll-of keyword-ish? :kind set? :into #{}))
+(s/def ::wheres (s/coll-of keyword-ish? :kind set? :into #{}))
+(s/def ::fields (s/coll-of keyword-ish? :kind set? :into #{}))
 
 (s/def ::cardinality #{:many :one})
+(s/def ::joins (s/map-of keyword-ish?
+                         (s/or :many (s/tuple keyword-ish?)
+                               :one keyword-ish?)))
 
 (s/def ::entity-spec (s/keys :req [::key] :opt [::selects ::wheres ::fields ::joins]))
 
@@ -26,6 +35,7 @@
   (doto (s/assert ::entity-spec entity-spec) prn)
 
   (-> (s/conform ::entity-spec entity-spec)
+      (select-keys [::key ::selects ::wheres ::fields ::joins])
       (update ::joins (fn [joins]
                         (->> joins
                              (into {} (map (fn [[k [cardinality join-opt]]]
@@ -49,18 +59,18 @@
   (fetch-entity query opts))
 
 (s/def ::query-param
-  (s/or ::wheres (s/map-of keyword? any?)
-        ::field keyword?
+  (s/or ::where (s/map-of keyword-ish? any?)
+        ::field keyword-ish?
         ::sub-query ::sub-query))
 
 (s/def ::sub-query
-  (s/spec (s/cat ::from keyword?
+  (s/spec (s/cat ::from keyword-ish?
                  ::query-params (s/* ::query-param))))
 
 (s/def ::query
-  (s/cat ::from keyword?
-         ::select-spec (s/spec (s/? (s/cat ::select-key keyword?
-                                           ::select-vals (s/+ any?))))
+  (s/cat ::from keyword-ish?
+         ::select (s/spec (s/? (s/cat ::select-key keyword-ish?
+                                      ::select-vals (s/+ any?))))
          ::query-params (s/* ::query-param)))
 
 (def field-presence-kw
@@ -76,30 +86,29 @@
                                                                  :query query
                                                                  :explain-data (s/explain-data ::query query)})))
                               conformed))]
-    (letfn [(parse-query* [{::keys [from select-spec query-params]}]
+    (letfn [(parse-query* [query]
               (reduce (fn [acc [qp-type qp]]
                         (case qp-type
                           ::sub-query (update acc ::sub-queries (fnil conj []) (parse-query* qp))
                           ::field (update acc ::fields (fnil conj #{}) qp)
-                          ::wheres (update acc ::wheres (fnil merge {}) qp)))
+                          ::where (update acc ::where (fnil merge {}) qp)))
 
-                      {::from from
-                       ::select-spec select-spec}
+                      (select-keys query [::from ::select])
 
-                      query-params))]
+                      (::query-params query)))]
       (parse-query* conformed-query))))
 
-(defn apply-query [{::keys [from select-spec fields wheres]}]
+(defn apply-query [{::keys [from select fields where]}]
   (let [keep? (apply every-pred
-                     (if-let [{::keys [select-key select-vals]} select-spec]
+                     (if-let [{::keys [select-key select-vals]} select]
                        (comp (set select-vals) select-key)
                        identity)
 
-                     (for [[where values] wheres
+                     (for [[field values] where
                            :when (some? values)]
                        (cond
-                         (boolean? values) #(= (get % where) values)
-                         (set? values) #(contains? values (get % where))
+                         (boolean? values) #(= (get % field) values)
+                         (set? values) #(contains? values (get % field))
                          :else identity)))
 
         deselected-fields (set/difference (::fields (*entity-spec* from)) fields)]
@@ -109,21 +118,20 @@
         (apply dissoc instance deselected-fields)))))
 
 (defn fetch [db query query-opts]
-  (loop [[{::keys [from wheres fields select-spec sub-queries] :as entity-query} & more-queries] [(parse-query query)]
+  (loop [[{::keys [from where fields select sub-queries] :as entity-query} & more-queries] [(parse-query query)]
          db db]
     (if-not entity-query
       db
 
       (let [entity (*entity-spec* from)
-            query-res (-> (*fetch-entity* (merge #::{:from from,
-                                                     :wheres wheres,
+            query-res (-> (*fetch-entity* (merge #::{:from from, :where where,
                                                      :fields (into #{}
                                                                    (keep (fn [field]
                                                                            (when (contains? fields field)
                                                                              (field-presence-kw field))))
                                                                    (::fields entity))}
-                                                 (when select-spec
-                                                   {::select (mapv select-spec [:select-key :select-vals])}))
+                                                 (when select
+                                                   {::select (mapv select [:select-key :select-vals])}))
 
                                           query-opts)
 
@@ -158,7 +166,7 @@
                                 {sub-entity-key ::key} (*entity-spec* entity)]
                             (assoc instance from (-> (q* (merge sub-query
                                                              {::from entity
-                                                              ::select-spec (case cardinality
+                                                              ::select (case cardinality
                                                                               :many {::select-key entity-key
                                                                                      ::select-vals [(get instance entity-key)]}
                                                                               :one {::select-key sub-entity-key
@@ -167,6 +175,8 @@
                         instance
                         sub-queries))))]
     (q* (parse-query query))))
+
+(def q1 (comp first q))
 
 ;; ----- COMMANDS -----
 
@@ -180,7 +190,7 @@
                                               ~@body)})
      op#))
 
-(s/def ::op keyword?)
+(s/def ::op keyword-ish?)
 
 (s/def ::command
   (s/cat ::op ::op
@@ -198,15 +208,17 @@
                                                                              ::cmd-error :unknown-op
                                                                              ::op op})))
 
-        conformed-data (when-let [conformed (s/conform cmd-spec data)]
-                         (or (when-not (= ::s/invalid conformed)
-                               conformed)
-                             (throw (ex-info "Error conforming command data"
-                                             {::error :bad-cmd
-                                              ::cmd-error :error-conforming-data
-                                              :op op
-                                              :data data
-                                              :explain (s/explain-data cmd-spec data)}))))]
+        conformed-data (if cmd-spec
+                         (let [conformed (s/conform cmd-spec data)]
+                           (or (when-not (= ::s/invalid conformed)
+                                 conformed)
+                               (throw (ex-info "Error conforming command data"
+                                               {::error :bad-cmd
+                                                ::cmd-error :error-conforming-data
+                                                :op op
+                                                :data data
+                                                :explain (s/explain-data cmd-spec data)}))))
+                         data)]
 
     (try
       (run-cmd! conformed-data cmd-opts)
@@ -253,10 +265,13 @@
            :content "Nice blog!"}]
          (into {} (map (juxt :comment-key identity)))))
 
-  (let [query `(:comment [] (:blog #_(:comments))) #_`(:blog [:blog-id "foo-blog"]
-                                                             {:published? nil}
-                                                             (:comments))
+  (let [query (or `(:comment [:blog-id "foo-blog"]
+                             {::limit 4}
+                             (:blog (:comments)))
+                  `(:blog [:blog-id "foo-blog"]
+                          {:published? nil}
+                          (:comments)))
 
         db (fetch {} query {})]
 
-    (q db query)))
+    (q1 db query)))
