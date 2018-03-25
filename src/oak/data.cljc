@@ -8,22 +8,24 @@
 
 (def !entities (atom {}))
 
-(s/def ::selects (s/coll-of keyword? :kind set?))
-(s/def ::props (s/map-of keyword? any?))
-(s/def ::field keyword?)
-(s/def ::fields (s/coll-of ::field :kind set?))
+(defn- ^:dynamic *entity-spec* [entity]
+  (get @!entities entity))
+
 (s/def ::key keyword?)
+(s/def ::selects (s/coll-of keyword? :kind set? :into #{}))
+(s/def ::wheres (s/coll-of keyword? :kind set? :into #{}))
+(s/def ::fields (s/coll-of keyword? :kind set? :into #{}))
 (s/def ::joins (s/map-of keyword? (s/or :many (s/tuple keyword?)
                                         :one keyword?)))
 
 (s/def ::cardinality #{:many :one})
 
-(defn transform-entity-spec [entity-spec]
-  (s/assert (s/keys :opt [::selects ::props ::fields ::key ::joins])
-            entity-spec)
+(s/def ::entity-spec (s/keys :req [::key] :opt [::selects ::wheres ::fields ::joins]))
 
-  (-> (s/conform (s/keys :opt [::selects ::props ::fields ::key ::joins])
-                 entity-spec)
+(defn transform-entity-spec [entity-spec]
+  (doto (s/assert ::entity-spec entity-spec) prn)
+
+  (-> (s/conform ::entity-spec entity-spec)
       (update ::joins (fn [joins]
                         (->> joins
                              (into {} (map (fn [[k [cardinality join-opt]]]
@@ -47,13 +49,13 @@
   (fetch-entity query opts))
 
 (s/def ::query-param
-  (s/or ::props (s/map-of keyword? any?)
+  (s/or ::wheres (s/map-of keyword? any?)
         ::field keyword?
-        ::sub-query (s/spec ::sub-query)))
+        ::sub-query ::sub-query))
 
 (s/def ::sub-query
-  (s/cat ::from keyword?
-         ::query-params (s/* ::query-param)))
+  (s/spec (s/cat ::from keyword?
+                 ::query-params (s/* ::query-param))))
 
 (s/def ::query
   (s/cat ::from keyword?
@@ -79,7 +81,7 @@
                         (case qp-type
                           ::sub-query (update acc ::sub-queries (fnil conj []) (parse-query* qp))
                           ::field (update acc ::fields (fnil conj #{}) qp)
-                          ::props (update acc ::props (fnil merge {}) qp)))
+                          ::wheres (update acc ::wheres (fnil merge {}) qp)))
 
                       {::from from
                        ::select-spec select-spec}
@@ -87,44 +89,34 @@
                       query-params))]
       (parse-query* conformed-query))))
 
-(defn apply-query [{::keys [from select-spec fields props]}]
+(defn apply-query [{::keys [from select-spec fields wheres]}]
   (let [keep? (apply every-pred
                      (if-let [{::keys [select-key select-vals]} select-spec]
                        (comp (set select-vals) select-key)
                        identity)
 
-                     (for [[prop values] props
+                     (for [[where values] wheres
                            :when (some? values)]
                        (cond
-                         (boolean? values) #(= (get % prop) values)
-                         (set? values) #(contains? values (get % prop))
+                         (boolean? values) #(= (get % where) values)
+                         (set? values) #(contains? values (get % where))
                          :else identity)))
 
-        deselected-fields (set/difference (get-in @!entities [from ::fields]) fields)]
+        deselected-fields (set/difference (::fields (*entity-spec* from)) fields)]
 
     (fn [instance]
       (when (keep? instance)
         (apply dissoc instance deselected-fields)))))
 
-(defn by-key [o f]
-  (if (map? o)
-    o
-    (-> (reduce (fn [acc el]
-                  (let [k (f el)]
-                    (assoc! acc k (merge (get acc k) el))))
-                (transient {})
-                o)
-        persistent!)))
-
 (defn fetch [db query query-opts]
-  (loop [[{::keys [from props fields select-spec sub-queries] :as entity-query} & more-queries] [(parse-query query)]
+  (loop [[{::keys [from wheres fields select-spec sub-queries] :as entity-query} & more-queries] [(parse-query query)]
          db db]
     (if-not entity-query
       db
 
-      (let [entity (get @!entities from)
+      (let [entity (*entity-spec* from)
             query-res (-> (*fetch-entity* (merge #::{:from from,
-                                                     :props props,
+                                                     :wheres wheres,
                                                      :fields (into #{}
                                                                    (keep (fn [field]
                                                                            (when (contains? fields field)
@@ -134,7 +126,7 @@
                                                    {::select (mapv select-spec [:select-key :select-vals])}))
 
                                           query-opts)
-                          (by-key (::key entity))
+
                           (->> (into {} (let [transform (apply-query entity-query)]
                                           (keep (fn [[k v]]
                                                   (when-let [transformed-v (transform v)]
@@ -143,7 +135,7 @@
         (recur (concat (when (seq query-res)
                          (for [{::keys [from] :as sub-query} sub-queries]
                            (let [{join-entity ::entity, ::keys [cardinality]} (get-in entity [::joins from])
-                                 {join-entity-key ::key} (get @!entities join-entity)]
+                                 {join-entity-key ::key} (*entity-spec* join-entity)]
                              (merge sub-query
                                     {::from join-entity
                                      ::select (case cardinality
@@ -156,14 +148,14 @@
                                   (merge-with merge existing-entities query-res)))))))))
 
 (defn q [db query]
-  (letfn [(q* [{::keys [from select-spec sub-queries] :as parsed-query}]
-            (let [{entity-key ::key, :as entity} (get @!entities from)]
+  (letfn [(q* [{::keys [from sub-queries] :as parsed-query}]
+            (let [{entity-key ::key, :as entity} (*entity-spec* from)]
               (for [instance (->> (vals (get db from))
                                   (into [] (keep (apply-query parsed-query))))]
 
                 (reduce (fn [instance {::keys [from] :as sub-query}]
                           (let [{::keys [cardinality entity]} (get-in entity [::joins from])
-                                {sub-entity-key ::key} (get @!entities entity)]
+                                {sub-entity-key ::key} (*entity-spec* entity)]
                             (assoc instance from (-> (q* (merge sub-query
                                                              {::from entity
                                                               ::select-spec (case cardinality
@@ -239,14 +231,15 @@
   (defentity :blog
     #::{:key :blog-id
         :fields #{:content}
-        :props {:published? boolean?}
+        :wheres #{:published?}
         :joins {:comments [:comment]}})
 
-  (defmethod fetch-entity :blog [{::keys [select props fields joins] :as query} {}]
-    [{:blog-id "foo-blog"
-      :title "Foo Blog"
-      :published? true
-      :content "Welcome to my blog!"}])
+  (defmethod fetch-entity :blog [{::keys [select wheres fields joins] :as query} {}]
+    (->> [{:blog-id "foo-blog"
+           :title "Foo Blog"
+           :published? true
+           :content "Welcome to my blog!"}]
+         (into {} (map (juxt :blog-id identity)))))
 
   (defentity :comment
     #::{:key :comment-key
@@ -255,14 +248,15 @@
         :joins {:blog :blog}})
 
   (defmethod fetch-entity :comment [{::keys [select fields joins]} {}]
-    [{:comment-key {:blog-id "foo-blog", :comment-id "foo-comment-1"}
-      :blog-id "foo-blog"
-      :content "Nice blog!"}])
+    (->> [{:comment-key {:blog-id "foo-blog", :comment-id "foo-comment-1"}
+           :blog-id "foo-blog"
+           :content "Nice blog!"}]
+         (into {} (map (juxt :comment-key identity)))))
 
-  (let [query #_`(:comment [] (:blog #_(:comments))) `(:blog [:blog-id "foo-blog"]
-                                                             {:published? true}
+  (let [query `(:comment [] (:blog #_(:comments))) #_`(:blog [:blog-id "foo-blog"]
+                                                             {:published? nil}
                                                              (:comments))
 
-        db (fetch query {})]
+        db (fetch {} query {})]
 
     (q db query)))

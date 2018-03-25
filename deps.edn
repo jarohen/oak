@@ -3,8 +3,8 @@
         com.cemerick/url {:mvn/version "0.1.1"},
         reagent {:mvn/version "0.7.0"}}
 
- :aliases {:dev {:extra-deps {org.clojure/clojurescript {:mvn/version "1.9.946"},
-                              javax.xml.bind/jaxb-api {:mvn/version "2.3.0"},
-                              org.clojure/core.async {:mvn/version "0.3.442"},
-                              cljs-http {:mvn/version "0.1.43"},
-                              bidi {:mvn/version "2.1.1"}}}}}
+ :aliases {:repl {:extra-deps {org.clojure/clojurescript {:mvn/version "1.9.946"},
+                               javax.xml.bind/jaxb-api {:mvn/version "2.3.0"},
+                               org.clojure/core.async {:mvn/version "0.3.442"},
+                               cljs-http {:mvn/version "0.1.43"},
+                               bidi {:mvn/version "2.1.1"}}}}}
