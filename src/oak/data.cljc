@@ -1,6 +1,7 @@
 (ns oak.data
   (:require [clojure.spec.alpha :as s]
-            [clojure.set :as set])
+            [clojure.set :as set]
+            [clojure.walk :as w])
   #?(:cljs (:require-macros [oak.data])))
 
 (def !entities
@@ -177,7 +178,62 @@
         db (fetch query {})]
 
     (q db query)))
+;; ----- COMMANDS -----
 
+(def ^:private !commands
+  (atom {}))
+
+(defmacro defcmd [op cmd-spec [& bindings] & body]
+  `(let [op# ~op]
+     (swap! !commands assoc op# {::cmd-spec ~cmd-spec
+                                 ::run-cmd! (fn [~@bindings]
+                                              ~@body)})
+     op#))
+
+(s/def ::op keyword?)
+
+(s/def ::command
+  (s/cat ::op ::op
+         ::data any?))
+
+(defn cmd! [cmd cmd-opts]
+  (let [{::keys [op data]} (let [conformed (s/conform ::command cmd)]
+                             (or (when-not (= ::s/invalid conformed)
+                                   conformed)
+                                 (throw (ex-info "Invalid command passed to `cmd!`"
+                                                 {:explain (s/explain-data ::command cmd)}))))
+
+        {::keys [cmd-spec run-cmd!]} (or (get @!commands op)
+                                         (throw (ex-info "Unknown `cmd` op" {::error :bad-cmd
+                                                                             ::cmd-error :unknown-op
+                                                                             ::op op})))
+
+        conformed-data (when-let [conformed (s/conform cmd-spec data)]
+                         (or (when-not (= ::s/invalid conformed)
+                               conformed)
+                             (throw (ex-info "Error conforming command data"
+                                             {::error :bad-cmd
+                                              ::cmd-error :error-conforming-data
+                                              :op op
+                                              :data data
+                                              :explain (s/explain-data cmd-spec data)}))))]
+
+    (try
+      (run-cmd! conformed-data cmd-opts)
+
+      (catch Exception e
+        (throw (if (::error (ex-data e))
+                 e
+                 (ex-info "Error running command"
+                          {::error :unknown-cmd-error
+                           ::cmd-error :error-running-cmd
+                           :op op
+                           :data data}
+                          e)))))))
+
+(defn apply-tempids [{::keys [tempids]} query]
+  (->> query
+       (w/postwalk-replace tempids)))
 
 ;; ----------------------
 
