@@ -4,13 +4,14 @@
             [clojure.walk :as w])
   #?(:cljs (:require-macros [oak.data])))
 
-(def !entities
-  (atom {}))
+;; ----- QUERIES -----
+
+(def !entities (atom {}))
 
 (s/def ::selects (s/coll-of keyword? :kind set?))
 (s/def ::props (s/map-of keyword? any?))
-(s/def ::facet keyword?)
-(s/def ::facets (s/coll-of ::facet :kind set?))
+(s/def ::field keyword?)
+(s/def ::fields (s/coll-of ::field :kind set?))
 (s/def ::key keyword?)
 (s/def ::joins (s/map-of keyword? (s/or :many (s/tuple keyword?)
                                         :one keyword?)))
@@ -18,7 +19,10 @@
 (s/def ::cardinality #{:many :one})
 
 (defn transform-entity-spec [entity-spec]
-  (-> (s/conform (s/keys :opt [::selects ::props ::facets ::key ::joins])
+  (s/assert (s/keys :opt [::selects ::props ::fields ::key ::joins])
+            entity-spec)
+
+  (-> (s/conform (s/keys :opt [::selects ::props ::fields ::key ::joins])
                  entity-spec)
       (update ::joins (fn [joins]
                         (->> joins
@@ -44,7 +48,7 @@
 
 (s/def ::query-param
   (s/or ::props (s/map-of keyword? any?)
-        ::facet keyword?
+        ::field keyword?
         ::sub-query (s/spec ::sub-query)))
 
 (s/def ::sub-query
@@ -57,31 +61,33 @@
                                            ::select-vals (s/+ any?))))
          ::query-params (s/* ::query-param)))
 
-(def facet-presence-kw
-  (-> (fn [facet]
-        (keyword (namespace facet) (str (name facet) "?")))
+(def field-presence-kw
+  (-> (fn [field]
+        (keyword (namespace field) (str (name field) "?")))
       memoize))
 
 (defn- parse-query [query]
-  (let [conformed-query (s/conform ::query query)]
-    (if-not (= conformed-query ::s/invalid)
-      (letfn [(parse-query* [{::keys [from select-spec query-params]}]
-                (reduce (fn [acc [qp-type qp]]
-                          (case qp-type
-                            ::sub-query (update acc ::sub-queries (fnil conj []) (parse-query* qp))
-                            ::facet (update acc ::facets (fnil conj #{}) qp)
-                            ::props (update acc ::props (fnil merge {}) qp)))
+  (let [conformed-query (let [conformed (s/conform ::query query)]
+                          (or (when (= ::s/invalid conformed)
+                                (throw (ex-info "Invalid query" {::error :bad-query
+                                                                 ::query-error :malformed-query
+                                                                 :query query
+                                                                 :explain-data (s/explain-data ::query query)})))
+                              conformed))]
+    (letfn [(parse-query* [{::keys [from select-spec query-params]}]
+              (reduce (fn [acc [qp-type qp]]
+                        (case qp-type
+                          ::sub-query (update acc ::sub-queries (fnil conj []) (parse-query* qp))
+                          ::field (update acc ::fields (fnil conj #{}) qp)
+                          ::props (update acc ::props (fnil merge {}) qp)))
 
-                        {::from from
-                         ::select-spec select-spec}
+                      {::from from
+                       ::select-spec select-spec}
 
-                        query-params))]
-        (parse-query* conformed-query))
+                      query-params))]
+      (parse-query* conformed-query))))
 
-      (throw (ex-info "Invalid query" {:query query
-                                       :explain-data (s/explain-data ::query query)})))))
-
-(defn apply-query [{::keys [from select-spec facets props]}]
+(defn apply-query [{::keys [from select-spec fields props]}]
   (let [keep? (apply every-pred
                      (if-let [{::keys [select-key select-vals]} select-spec]
                        (comp (set select-vals) select-key)
@@ -94,34 +100,36 @@
                          (set? values) #(contains? values (get % prop))
                          :else identity)))
 
-        deselected-facets (set/difference (get-in @!entities [from ::facets]) facets)]
+        deselected-fields (set/difference (get-in @!entities [from ::fields]) fields)]
 
     (fn [instance]
       (when (keep? instance)
-        (apply dissoc instance deselected-facets)))))
+        (apply dissoc instance deselected-fields)))))
 
-(defn by-key [res f]
-  (if (map? res)
-    res
-    (-> (reduce (fn [res el]
+(defn by-key [o f]
+  (if (map? o)
+    o
+    (-> (reduce (fn [acc el]
                   (let [k (f el)]
-                    (assoc! res k (merge (get res k) el))))
+                    (assoc! acc k (merge (get acc k) el))))
                 (transient {})
-                res)
+                o)
         persistent!)))
 
-(defn fetch [query query-opts]
-  (loop [[{::keys [from props facets select-spec sub-queries] :as entity-query} & more-queries] [(parse-query query)]
-         res {}]
-    (if entity-query
+(defn fetch [db query query-opts]
+  (loop [[{::keys [from props fields select-spec sub-queries] :as entity-query} & more-queries] [(parse-query query)]
+         db db]
+    (if-not entity-query
+      db
+
       (let [entity (get @!entities from)
             query-res (-> (*fetch-entity* (merge #::{:from from,
                                                      :props props,
-                                                     :facets (into #{}
-                                                                   (keep (fn [facet]
-                                                                           (when (contains? facets facet)
-                                                                             (facet-presence-kw facet))))
-                                                                   (::facets entity))}
+                                                     :fields (into #{}
+                                                                   (keep (fn [field]
+                                                                           (when (contains? fields field)
+                                                                             (field-presence-kw field))))
+                                                                   (::fields entity))}
                                                  (when select-spec
                                                    {::select (mapv select-spec [:select-key :select-vals])}))
 
@@ -143,11 +151,9 @@
                                                 :one [join-entity-key (into #{} (keep join-entity-key) (vals query-res))])}))))
                        more-queries)
 
-               (-> res
+               (-> db
                    (update from (fn [existing-entities]
-                                  (merge-with merge existing-entities query-res))))))
-
-      res)))
+                                  (merge-with merge existing-entities query-res)))))))))
 
 (defn q [db query]
   (letfn [(q* [{::keys [from select-spec sub-queries] :as parsed-query}]
@@ -170,14 +176,6 @@
                         sub-queries))))]
     (q* (parse-query query))))
 
-(comment
-  (let [query #_`(:comment [] (:blog #_(:comments))) `(:blog [:blog-id "foo-blog"]
-                                                             {:published? true}
-                                                             (:comments))
-
-        db (fetch query {})]
-
-    (q db query)))
 ;; ----- COMMANDS -----
 
 (def ^:private !commands
@@ -240,11 +238,11 @@
 (comment
   (defentity :blog
     #::{:key :blog-id
-        :facets #{:content}
+        :fields #{:content}
         :props {:published? boolean?}
         :joins {:comments [:comment]}})
 
-  (defmethod fetch-entity :blog [{::keys [select props facets joins] :as query} {}]
+  (defmethod fetch-entity :blog [{::keys [select props fields joins] :as query} {}]
     [{:blog-id "foo-blog"
       :title "Foo Blog"
       :published? true
@@ -253,10 +251,18 @@
   (defentity :comment
     #::{:key :comment-key
         :selects #{:blog-id}
-        :facets #{:content}
+        :fields #{:content}
         :joins {:blog :blog}})
 
-  (defmethod fetch-entity :comment [{::keys [select facets joins]} {}]
+  (defmethod fetch-entity :comment [{::keys [select fields joins]} {}]
     [{:comment-key {:blog-id "foo-blog", :comment-id "foo-comment-1"}
       :blog-id "foo-blog"
-      :content "Nice blog!"}]))
+      :content "Nice blog!"}])
+
+  (let [query #_`(:comment [] (:blog #_(:comments))) `(:blog [:blog-id "foo-blog"]
+                                                             {:published? true}
+                                                             (:comments))
+
+        db (fetch query {})]
+
+    (q db query)))
