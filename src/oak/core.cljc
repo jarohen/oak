@@ -40,11 +40,6 @@
                 (when ev
                   (send! ctx ev))))))))
 
-(defn fmap-cmd [f cmd]
-  (fn [cb]
-    (cmd (fn [ev]
-           (cb (f ev))))))
-
 (defn- apply% [f args]
   #(apply f % args))
 
