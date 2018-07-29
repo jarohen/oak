@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    
+  <modelVersion>4.0.0</modelVersion>
+    
+  <groupId>jarohen</groupId>
+    
+  <artifactId>oak</artifactId>
+    
+  <packaging>jar</packaging>
+    
+  <version>0.0.1-SNAPSHOT</version>
+    
+  <name>oak</name>
+    
+  <description>A ClojureScript library to structure single-page apps - taking inspiration from the Elm Architecture</description>
+    
+  <url>https://github.com/jarohen/oak</url>
+    
+  <licenses>
+        
+    <license>
+            
+      <name>Eclipse Public License</name>
+            
+      <url>http://www.eclipse.org/legal/epl-v10.html</url>
+          
+    </license>
+      
+  </licenses>
+    
+  <scm>
+        
+    <connection>scm:git:git://github.com/jarohen/oak.git</connection>
+        
+    <developerConnection>scm:git:ssh://git@github.com/jarohen/oak.git</developerConnection>
+        
+    <tag>08fe5a2e15f81a9129e012fdea0fdf11bd28d627
+    </tag>
+        
+    <url>https://github.com/jarohen/oak</url>
+      
+  </scm>
+    
+  <build>
+        
+    <sourceDirectory>src</sourceDirectory>
+        
+    <testSourceDirectory>test</testSourceDirectory>
+        
+    <resources>
+            
+      <resource>
+                
+        <directory>resources</directory>
+              
+      </resource>
+            
+      <resource>
+                
+        <directory>src</directory>
+              
+      </resource>
+          
+    </resources>
+        
+    <testResources>
+            
+      <testResource>
+                
+        <directory>resources</directory>
+              
+      </testResource>
+          
+    </testResources>
+        
+    <directory>target</directory>
+        
+    <outputDirectory>target/classes</outputDirectory>
+        
+    <plugins/>
+      
+  </build>
+    
+  <repositories>
+    <repository>
+      <id>clojars</id>
+      <url>https://repo.clojars.org/</url>
+    </repository>
+  </repositories>
+    
+  <dependencies>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>clojure</artifactId>
+      <version>1.9.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>spec.alpha</artifactId>
+      <version>0.1.143</version>
+    </dependency>
+    <dependency>
+      <groupId>com.cemerick</groupId>
+      <artifactId>url</artifactId>
+      <version>0.1.1</version>
+    </dependency>
+    <dependency>
+      <groupId>reagent</groupId>
+      <artifactId>reagent</artifactId>
+      <version>0.7.0</version>
+    </dependency>
+  </dependencies>
+    
+  <distributionManagement>
+        
+    <repository>
+            
+      <id>clojars</id>
+            
+      <name>Clojars repository</name>
+            
+      <url>https://clojars.org/repo</url>
+          
+    </repository>
+      
+  </distributionManagement>
+  
+</project>
