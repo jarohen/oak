@@ -29,13 +29,15 @@
 
 (defn- handle-cmds! [cmds]
   (doseq [{:oak/keys [cmd-type cmd-args ctx]} cmds]
-    (let [{:keys [oak/cmd-handlers]} ctx]
+    (let [{:keys [oak/cmd-handlers oak/!app oak/!db]} ctx]
       ;; if cmd-handlers is provided, and there's no cmd-handler for this type,
       ;; it's a no-op
       (when-let [cmd! (if cmd-handlers
                         (get cmd-handlers cmd-type)
                         cmd!)]
-        (cmd! (merge cmd-args {:oak/cmd-type cmd-type})
+        (cmd! (merge cmd-args {:oak/cmd-type cmd-type
+                               :oak/app @!app
+                               :oak/db @!db})
               (fn [ev]
                 (when ev
                   (send! ctx ev))))))))
@@ -91,8 +93,10 @@
              (->> (:oak/on attrs)
                   (into {} (keep (fn [[dom-ev ev]]
                                    [(->reagent-ev dom-ev) (fn [e]
-                                                            #?(:cljs (.preventDefault e))
-                                                            (send! ctx ev))])))))
+                                                            (when-not (false? (:oak/prevent-default? (meta ev)))
+                                                              #?(:cljs (.preventDefault e)))
+
+                                                            (send! ctx (merge ev {:oak/react-ev e})))])))))
 
       (dissoc :oak/on)))
 

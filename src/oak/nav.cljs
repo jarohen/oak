@@ -1,5 +1,5 @@
 (ns oak.nav
-  (:require [oak.core :as o]
+  (:require [oak.core :as oak]
             [cemerick.url :as curl]
             [cljs.reader :as edn])
 
@@ -15,25 +15,22 @@
            {:query-params query
             :history-state (some-> js/history.state edn/read-string)})))
 
-(defn location->href [ctx {:keys [handler route-params query-params] :as location}]
-  (str (merge (curl/url (str js/document.origin (unparse (get-in ctx [::nav :router]) handler route-params)))
-              {:query query-params})))
+(defn location->href [{:keys [handler route-params query-params anchor] :as location} {:keys [::router]}]
+  (str (merge (curl/url (str js/document.origin (unparse router handler route-params)))
+              {:query query-params
+               :anchor anchor})))
 
-(defn nav-cmd [ctx method {:keys [history-state] :as new-location}]
-  (fn [cb]
-    (let [update-location! (case method
-                             :push #(js/history.pushState %1 %2 %3)
-                             :replace #(js/history.replaceState %1 %2 %3))]
-      (update-location! (pr-str history-state) nil (location->href ctx new-location))
+(defn- nav-cmd [{:keys [::update-location! location] :as cmd} cb]
+  (update-location! (pr-str (:history-state location))
+                    nil
+                    (location->href location {::router (get-in cmd [:oak/db ::router])}))
+  (cb [::location-changed {:new-location location}]))
 
-      (cb (merge (get-in ctx [::nav :change-ev])
-                 {:new-location new-location})))))
+(defmethod oak/cmd! ::push-location [{:keys [location] :as cmd} cb]
+  (nav-cmd (merge cmd {::update-location! #(js/history.pushState %1 %2 %3)}) cb))
 
-(defn push-cmd [ctx location]
-  (nav-cmd ctx :push location))
-
-(defn replace-cmd [ctx location]
-  (nav-cmd ctx :replace location))
+(defmethod oak/cmd! ::replace-location [{:keys [location] :as cmd} cb]
+  (nav-cmd (merge cmd {::update-location! #(js/history.replaceState %1 %2 %3)}) cb))
 
 (defn intercept-click-event? [event]
   (let [event (BrowserEvent. event)]
@@ -45,22 +42,27 @@
          ;; save link as
          (not (.-altKey event)))))
 
-(defn link [ctx location]
-  {:href (location->href ctx location)
-   :on-click (fn [ev]
-               (when (intercept-click-event? ev)
-                 (.preventDefault ev)
-                 (o/send! ctx (o/ev ::link-clicked {:oak/root-ev? true
-                                                    :location location}))))})
+(defmethod oak/handle ::link-clicked [state {:keys [location oak/react-ev]}]
+  (if (intercept-click-event? react-ev)
+    (do
+      (.preventDefault react-ev)
+      (-> state
+          (oak/with-cmd [::push-location {:location location}])))
 
-(defmulti handle-mount (fn [ctx ev] (get-in ev [:location :handler])))
-(defmethod handle-mount :default [ctx {:keys [location]}] ctx)
+    state))
 
-(defmulti handle-change (fn [ctx ev] (get-in ev [:new-location :handler])))
-(defmethod handle-change :default [ctx {:keys [old-location new-location]}] ctx)
+(defn link [location]
+  {:href (location->href location {::router (oak/*db* ::router)})
+   :on-click ^{:oak/prevent-default? false} [::link-clicked {:location location}]})
 
-(defmulti handle-unmount (fn [ctx ev] (get-in ev [:location :handler])))
-(defmethod handle-unmount :default [ctx {:keys [location]}] ctx)
+(defmulti handle-mount (fn [state ev] (get-in ev [:location :handler])))
+(defmethod handle-mount :default [state {:keys [location]}] state)
+
+(defmulti handle-change (fn [state ev] (get-in ev [:new-location :handler])))
+(defmethod handle-change :default [state {:keys [old-location new-location]}] state)
+
+(defmulti handle-unmount (fn [state ev] (get-in ev [:location :handler])))
+(defmethod handle-unmount :default [state {:keys [location]}] state)
 
 (defn ks= [ks & ms]
   (apply = (->> ms
@@ -69,30 +71,33 @@
                                     (select-keys ks)
                                     (->> (into {} (remove (comp (some-fn nil? #{{} []}) val)))))))))))
 
-(defn handle-nav [ctx {:keys [old-location new-location]}]
-  (let [remount? (not (ks= [:handler :route-params]
+(defmethod oak/handle ::location-changed [state {:keys [new-location]}]
+  (let [old-location (get-in state [:oak/db ::location])
+        remount? (not (ks= [:handler :route-params]
                            old-location new-location))
-        change? (not (ks= [:handler :route-params :query-params :history-state]
-                          old-location new-location))]
-    (-> ctx
-        (cond-> (and change? (not remount?)) (handle-change {:old-location old-location
-                                                             :new-location new-location}))
-        (cond-> (and remount? old-location) (handle-unmount {:location old-location}))
-        (cond-> remount? (handle-mount {:location new-location})))))
 
-(defn wrap-nav [{:keys [->initial-state handle-ev] :as sys} {:keys [change-ev router]}]
-  (let [initial-loc (browser-location router)]
-    (merge (dissoc sys :->initial-state)
-           {:initial-state (-> (merge (->initial-state {:location initial-loc})
-                                      {::nav {:router router
-                                              :change-ev change-ev}})
-                               (o/with-cmd (fn [cb]
-                                             (.addEventListener js/window
-                                                                "popstate"
-                                                                (fn [_]
-                                                                  (cb (merge change-ev {:new-location (browser-location router)})))))))
-            :handle-ev (fn [ctx ev]
-                         (case (:oak/event-type ev)
-                           ::link-clicked (-> ctx
-                                              (o/with-cmd (push-cmd ctx (:location ev))))
-                           (handle-ev ctx ev)))})))
+        change? (and (not remount?)
+                     (not (ks= [:handler :route-params :query-params :history-state]
+                               old-location new-location)))]
+
+    (-> state
+        (assoc-in [:oak/db ::location] new-location)
+        (cond-> change? (handle-change {:old-location old-location
+                                        :new-location new-location})
+
+                (and remount? old-location) (handle-unmount {:location old-location})
+
+                remount? (handle-mount {:location new-location})))))
+
+(defmethod oak/handle ::nav-initialised [state {:keys [location ::router]}]
+  (-> state
+      (assoc-in [:oak/db ::router] router)
+      (oak/handle [::location-changed {:new-location location}])))
+
+(defmethod oak/cmd! ::init-nav [{:keys [::router]} cb]
+  (.addEventListener js/window "popstate"
+                     (fn [_]
+                       (cb [::location-changed {:new-location (browser-location router)}])))
+
+  (cb [::nav-initialised {:location (browser-location router)
+                          ::router router}]))
