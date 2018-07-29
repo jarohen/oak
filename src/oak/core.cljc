@@ -150,13 +150,8 @@
     (transform-el* el)))
 
 (defn- tracker [!atom focus]
-  (fn [& path-or-fn]
-    (let [lookup (comp (cond
-                         (fn? (first path-or-fn)) (first path-or-fn)
-                         (vector? (first path-or-fn)) #(get-in % (first path-or-fn))
-                         :else #(get-in % path-or-fn))
-                       #(get-in % focus)
-                       deref)]
+  (fn [f & args]
+    (let [lookup (comp (apply% f args) #(get-in % focus) deref)]
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 

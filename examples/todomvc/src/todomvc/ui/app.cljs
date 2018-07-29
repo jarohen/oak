@@ -55,7 +55,7 @@
 (oak/defc todo-item [{:keys [todo-id]}]
   ^:oak/transient [{:keys [editing? new-label]} {:editing? false}]
 
-  (let [{:keys [todo-id label status] :as todo} (oak/*db* [:todos todo-id])]
+  (let [{:keys [todo-id label status] :as todo} (oak/*db* get-in [:todos todo-id])]
     [:li {:class #{(cond
                      editing? "editing"
                      (done? todo) "completed")}}
@@ -86,7 +86,7 @@
 (oak/defc todo-list [{:keys [todo-filter]}]
   [:ul.todo-list
    (doall
-    (for [{:keys [todo-id]} (->> (vals (oak/*db* [:todos]))
+    (for [{:keys [todo-id]} (->> (vals (oak/*db* :todos))
                                  (filter (comp (case todo-filter
                                                  :all #{:done :active}
                                                  :active #{:active}
@@ -134,7 +134,7 @@
 
 (oak/defc todo-clear []
   [:button.clear-completed {:oak/on {:click [::clear-completed]}
-                            :style {:display (if (seq (filter (comp #{:done} :status) (vals (oak/*db* [:todos]))))
+                            :style {:display (if (seq (filter (comp #{:done} :status) (vals (oak/*db* :todos))))
                                                "inline"
                                                "none")}}
    "Clear completed"])
