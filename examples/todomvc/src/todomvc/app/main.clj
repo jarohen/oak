@@ -25,12 +25,12 @@
    :optimizations :none
    :pretty-print true})
 
-(b/defcomponent *cljs* #{} []
+(b/defcomponent cljs-compiler
   (cljs/build (cljs/inputs "src" "../../src") cljs-opts)
 
   (-> (future
         (cljs/watch (cljs/inputs "src" "../../src") cljs-opts))
-      (b/with-stop (future-cancel *cljs*))))
+      (b/with-stop (future-cancel cljs-compiler))))
 
 (deftemplate index-tpl
   (slurp (io/resource "public/index.html")))
@@ -51,10 +51,12 @@
 
            (constantly (resp/not-found "Not Found"))))
 
-(b/defcomponent *server* #{#'*cljs*} []
+(b/defcomponent server
+  ^:bounce/deps #{cljs-compiler}
+
   (-> (http/start-server #'handler {:port 3000})
-      (b/with-stop (.close *server*))))
+      (b/with-stop (.close server))))
 
 (defn -main []
   (nrepl/start-server :port 7888 :handler (nrepl-handler))
-  (b/start! #{#'*server*}))
+  (b/start! #{#'server}))

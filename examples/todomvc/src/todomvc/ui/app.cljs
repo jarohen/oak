@@ -21,9 +21,9 @@
 (oak/defc toggle-all-component []
   [:span
    [:input.toggle-all {:type "checkbox"
-                       :checked (oak/*db* (comp #(every? done? %) vals :todos))
-                       :oak/on {:change [::toggle-all]}}]
-   [:label {:for "toggle-all"}
+                       :checked (oak/*db* (comp #(every? done? %) vals :todos))}]
+   [:label {:for "toggle-all"
+            :oak/on {:click [::toggle-all]}}
     "Mark all as complete"]])
 
 (defmethod oak/handle ::new-todo-submitted [state {:keys [new-todo-label]}]

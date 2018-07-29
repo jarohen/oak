@@ -107,7 +107,7 @@
                                            ;; TODO more types - checkbox + radio?
                                            [:value #?(:clj :oak/ev-value
                                                       :cljs #(.. % -target -value))])]
-                 {value-k (*local* bind)
+                 {value-k (*local* get-in bind)
                   :on-change (fn [e]
                                #?(:cljs (.preventDefault e))
                                (swap! (:oak/!app ctx) assoc-in ((fnil into []) focus bind) (ev->value e))
@@ -155,7 +155,7 @@
 
 (defn- tracker [!atom focus]
   (fn [f & args]
-    (let [lookup (comp (apply% f args) #(get-in % focus) deref)]
+    (let [lookup (comp (apply% f args) #(get-in % (or focus [])) deref)]
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 
@@ -174,15 +174,15 @@
                (when transients
                  {:component-will-mount (comp second
                                               (juxt (fn [& _]
-                                                      (swap! !app update-in-focus merge (->> transients
-                                                                                             (into {} (map (fn [[k v]]
-                                                                                                             [k (v)]))))))
+                                                      (swap! !app update-in-focus merge (when-let [{:oak/keys [->transients]} transients]
+                                                                                          (->transients))))
+
                                                     (or (:component-will-mount lifecycle-fns)
                                                         (fn [& _] {:oak/app @!app, :oak/db @!db}))))
 
                   :component-will-unmount (comp second
                                                 (juxt (fn [& _]
-                                                        (swap! !app update-in-focus #(apply dissoc % (keys transients))))
+                                                        (swap! !app update-in-focus #(apply dissoc % (:oak/transient-keys transients))))
                                                       (or (:component-will-unmount lifecycle-fns)
                                                           (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
 
@@ -236,14 +236,18 @@
       (throw (ex-info "Missing component" {})))))
 
 (defn ->component* {:style/indent :defn} [sym params body]
-  (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)]
-    `(let [transients# ~(some->> (second transients)
-                                 (into {} (map (fn [[k v]]
-                                                 `[~k (fn [] ~v)]))))
+  (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)
+        transients-sym (symbol (name 'oak.transients) (name (gensym sym)))]
+    `(let [transients# ~(when transients
+                          {:oak/transient-keys (set (keys (second transients)))
+                           :oak/->transients `(fn []
+                                                ~(second transients))})
+
            render# (fn ~sym [~@params]
                      ~@(if transients
-                         `[(let [~(first transients) (*local*)]
+                         `[(let [~(first transients) (*local* identity)]
                              ~@body)]
+
                          body))]
        (-> (fn [ctx#]
              (#'reagent-class {:oak/ctx ctx#
