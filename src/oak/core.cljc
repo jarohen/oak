@@ -101,7 +101,7 @@
                                                             (when-not (false? (:oak/prevent-default? (meta ev)))
                                                               #?(:cljs (.preventDefault e)))
 
-                                                            (send! ctx (merge ev {:oak/react-ev e})))])))))
+                                                            (send! ctx (-> ev (update 1 assoc :oak/react-ev e))))])))))
 
       (dissoc :oak/on)))
 
