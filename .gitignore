@@ -1,2 +1,4 @@
-pom.xml
 /target/
+/.cpcache
+/.nrepl-port
+/nashorn_code_cache

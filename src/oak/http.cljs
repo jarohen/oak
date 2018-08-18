@@ -1,12 +1,13 @@
 (ns oak.http
-  (:require [oak.async :as a]
-            [oak.core :as o]
-            [cljs-http.client :as http]))
+  (:require [oak.core :as oak]
+            [cljs-http.client :as http]
+            [cljs.core.async :as a])
+  (:require-macros [cljs.core.async.macros :refer [go]]))
 
-(defn request-cmd [{:keys [method url ev] :as opts}]
-  (->> (a/async-cmd (http/request (dissoc opts :ev)))
-       (o/fmap-cmd (fn [{:keys [success] :as resp}]
-                     (when ev
-                       (merge ev
-                              {:resp (dissoc resp :success)
-                               :success? success}))))))
+(defmethod oak/cmd! ::request! [{:keys [method url ev] :as opts} cb]
+  (go
+    (let [{:keys [success] :as resp} (a/<! (http/request (dissoc opts :ev)))]
+      (when-let [[ev-type ev-args] ev]
+        (cb [ev-type (merge ev-args
+                            {::resp (dissoc resp :success)
+                             ::success? success})])))))

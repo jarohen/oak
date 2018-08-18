@@ -15,3 +15,5 @@ pom.xml.asc
 /.repl/
 /node_modules/
 /figwheel_server.log
+/nashorn_code_cache
+/.cpcache

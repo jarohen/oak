@@ -1,22 +1,351 @@
 * Oak
-A ClojureScript library to structure single-page Reagent apps - taking inspiration from the Elm Architecture
+A ClojureScript library to structure single-page [[https://github.com/reagent-project/reagent][Reagent]] apps - taking
+inspiration from the Elm Architecture.
 
-Currently in early development. Check out the TodoMVC implementation for an idea of how it might work.
+** Concepts
 
-Thoughts so far:
-- I really like the Elm architecture - it's clean, stateless, built on vanilla
-  functional concepts, and introduces a clear structure so that it's clear where
-  each bit of code belongs
-- I also like a lot of things about CLJS - in particular: EDN/Transit, same
-  language front and back, LISP - so let's see if we can combine the two.
-- Differences to Elm:
-  - Elm elements can return messages from their on-* handlers - we have to have a side effecting call
-  - The 'Elm Way' seems to be to pass down a subset of the state to each
-    component. We split the state in two - a tree of component state (':app'),
-    and a global DB that contains data on the entities in the system.
-  - Elm seems to be moving to a way of parent-child communication that involves
-    the parent view telling the child view how to create parent-level events.
-    I'm going for a slightly different approach, whereby the parent update-fn
-    gives the child update-fn a way of updating the state. I do this so that a
-    child event has the /option/ of notifying the parent or not (rather than the
-    view way which means that the parent gets first control)
+Oak components are supersets of Reagent components - most of what you already
+know from Reagent applies here too.
+
+*** State management
+
+State management, in CLJS/Reagent applications, has traditionally been handled
+in one of two ways:
+
+- We /could/ store it in local Reagent 'ratoms', but over time, this has proven
+  to be problematic - if we want to serialise/re-construct the state of the
+  whole application, we have to go to each component and extract its individual
+  state. We'd rather this was available centrally.
+- We /could/ store it all in one global ratom. This has the advantage of being
+  able to serialise the entire app state easily. However, it's not ideal for
+  state that's logically scoped to a given component - should the component know
+  where in the global atom to store it? Particularly, if we have multiple
+  instances of the same component on screen, we don't want every individual
+  instance to know /exactly/ where to store its state.
+
+It seems that neither storing all our state in one atom, nor individually in
+each component, is a good solution to this problem.
+
+In Oak, therefore, we explicitly distinguish between these areas of state -
+state that's relevant to the whole application (usually business entities, known
+in Oak as the 'db'), and state that's only relevant to a single component (known
+as 'component local').
+
+In any given component, Oak exposes both the 'db' and the component's local
+state - but, overall, it stores the state of the application in one global
+ratom. Best of both worlds, hopefully!
+
+*** Events + commands
+
+We update the state by raising events in our DOM elements. Event handlers are
+defined separately from components - they are functions that accept the current
+state of the world and an event, and return the new state of the world. In Elm,
+these are implemented as a top-level function which delegates as necessary; in
+Oak, we use multimethods.
+
+Event handlers are synchronous - they are expected to return the new state
+immediately. Fortunately, they can also call 'commands' - functions that accept
+some command data and a callback. When the asynchronous part finishes, we call
+the callback, passing it an event value, and the cycle continues.
+
+** Creating components
+
+In Oak, we wrap component functions using the ~oak/defc~ macro:
+
+#+BEGIN_SRC clojure
+  (oak/defc simple-counter []
+    (let [counter-value (oak/*db* get ::counter 0)]
+      [:div {:class #{:counter}}
+       [:div
+        "The current value of the counter is "
+        counter-value]
+
+       [:button {:oak/on {:click [::counter-incremented {}]}}
+        "Increment!"]]))
+#+END_SRC
+
+A couple of points to note here:
+- We accessed the DB using ~oak/*db*~, which accepts ~f & args~ - if we didn't
+  want the default, we could simply use ~(oak/*db* ::counter)~. When this data
+  changes, the appropriate components get re-rendered.
+- To access component-local state, we'd use ~oak/*local*~ - more on that later.
+- When the button's clicked, we raise an Oak event of type
+  ~::counter-incremented~. We can optionally pass a map of parameters to the
+  event handler.
+
+To define an event handler, we implement the ~oak/handle~ defmulti:
+
+#+BEGIN_SRC clojure
+  (defmethod oak/handle ::counter-incremented [state ev]
+    (-> state
+        (oak/update-db update ::counter (fnil inc 0))))
+#+END_SRC
+
+In addition to ~update-db~, we also have ~get-db~, ~get-local~ and
+~update-local~.
+
+The original React event is available in the ~ev~ map, under `:oak/react-ev`.
+
+** Introducing commands - HTTP requests
+
+Event handlers have to return the next state of the world /synchronously/. To
+spawn an asynchronous action (for example, an HTTP request) we have to instruct
+Oak to run a command. Let's say we want to relay the counter action to our server:
+
+#+BEGIN_SRC clojure
+    ;; (:require [oak.http :as http])
+
+    (defmethod oak/handle ::counter-incremented [state _]
+      (-> state
+          (oak/update-db update ::counter (fnil inc 0))
+          (oak/with-cmds [::http/request! {:method :post,
+                                           :url "/api/increment-counter"
+                                           :ev [::increment-resp-received]}])))
+#+END_SRC
+
+The command data structure is similar to an event - a command type and some
+params. Here, the HTTP command is helpfully allowing us to specify another event
+that we'd like to be fired when the response is received.
+
+To make our own commands, we implement the ~oak/cmd!~ multimethod. For example,
+a simplified version of the above HTTP request command could be:
+
+#+BEGIN_SRC clojure
+  (ns oak.http
+    (:require [oak.core :as oak]
+              [cljs-http.client :as http]
+              [cljs.core.async :as a])
+    (:require-macros [cljs.core.async.macros :refer [go]]))
+
+  (defmethod oak/cmd! ::request! [{:keys [method url] :as opts} cb]
+    (go
+      (let [resp (a/<! (http/request opts))]
+        (cb [::response-received {::resp resp}]))))
+#+END_SRC
+
+Here, we're using core.async to wait for the result of the cljs-http request,
+and then calling through to the callback, generating a ~::response-received~
+event (to be handled by another ~oak/handle~ defmethod).
+
+** Within components
+*** Component local state
+In the counter example, above, we used the 'DB' area of Oak's state to store
+data that was relevant to the whole application. Frequently, though, we have to
+store data that's scoped to a given component - which we then access with
+~oak/*local*~.
+
+The 'component-local' part of the Oak state typically has a tree structure that
+loosely mirrors the component tree - each parent component stores the state of
+its child components. Having said that, we'd like each component to be able to
+access its state without knowing the tree structure above, so we borrow an idea
+from 'lenses' - specifying how to 'focus' from the larger data structure to the
+component's individual state.
+
+#+BEGIN_SRC clojure
+  (oak/defc todo-item [{:keys [todo-id]}]
+    (let [{:keys [...]} (oak/*local* ...)
+          {:keys [todo-id label status] :as todo} (oak/*db* get-in [:todos todo-id])]
+      [:li
+       ...]))
+
+  (oak/defc todo-list [{:keys [todo-filter]}]
+    (let [{:keys [...]} (oak/*local* ...)]
+      [:ul.todo-list
+       (doall
+        (for [{:keys [todo-id]} ...]
+          ^{:key (str todo-id)
+            :oak/focus [:items todo-id]}
+          [todo-item {:todo-id todo-id}]))]))
+#+END_SRC
+
+Points to note:
+- We specify the focus as meta-data on the call to the child component, in the
+  same way as we specify the React key on a collection of child elements - in
+  fact, the two are often found together.
+- ~oak/*local*~ returns the state of the component that it's called from - it'll
+  return a different state in each individual item than it will in the parent.
+
+We often store the current value of form inputs in local state, and then copy it
+to the DB when the user chooses to save it. If we were to follow the React
+pattern of storing the current value in a prop, specifying the value of the
+input box, and registering a change handler, it'd look something like this:
+
+#+BEGIN_SRC clojure
+  (defmethod oak/handle ::input-updated [state ev]
+    (-> state
+        (oak/update-local assoc :input-value (-> ev :oak/react-ev .-target .-value))))
+
+  (oak/defc my-form []
+    (let [{:keys [input-value]} (oak/*local* select-keys [:input-value])]
+      [:form
+       [:input {:type :text
+                :value input-value
+                :oak/on {:change [::input-updated]}}]]))
+#+END_SRC
+
+This gets quite boring quite quickly - so, for the simple case, Oak provides
+'binds':
+
+#+BEGIN_SRC clojure
+  (oak/defc my-form []
+    [:form
+     [:input {:type :text, :oak/bind [:input-value]}]])
+#+END_SRC
+
+The 'bind', in this case, is the path into the local state that stores the
+current value of that input field.
+
+(TODO: implement binds for non-text fields)
+
+*** Component lifecycle
+
+We can attach events to React/Reagent's usual component lifecycle. For example,
+to raise an event when a component's about to be mounted, we would write:
+
+#+BEGIN_SRC clojure
+  (defmethod oak/handle ::my-component-will-mount [state _]
+    ...)
+
+  (oak/defc my-component [...]
+    {:oak/on {:component-will-mount [::my-component-will-mount {...}]}}
+
+    [:div.my-component
+     ...])
+#+END_SRC
+
+A common use-case here is to set up some state when the component mounts, and
+tear it down when the component un-mounts. Fortunately, given this is such a
+common use-case, we provide an ~:oak/transients~ option, where you can set up
+transient component state:
+
+#+BEGIN_SRC clojure
+  (oak/defc my-component [...]
+    {:oak/transients [{:keys [selected-filter]} {:selected-filter :all}]}
+
+    [:div
+     (case selected-filter
+       :all "you selected all"
+       :some "you selected some")])
+#+END_SRC
+
+In the 'transients' option, we're specifying a binding for our transient state,
+and the initial value. Transient state is stored in the local component state,
+and is updated in the same way - likewise, it can be used in 'binds'.
+
+*** Child -> parent communication
+
+Often, child components need to relay something the user's done to their parent
+component - let's say, the user's finished with the child component and wants it
+to go away. The close button, and hence the responsibility for initially
+handling the user action, is on the child component - but the decision for what
+to do next (and the state to make it happen) rests with the parent.
+
+In Oak, parent components can specify a 'listener event' when calling through to
+a child component. When the child component wants to raise an event to their
+parent, they call 'notify' within one of their event handlers:
+
+#+BEGIN_SRC clojure
+  (defmethod oak/handle ::child-form-submitted [state ev]
+    (-> state
+        (cond-> form-valid? (oak/notify [::notify-child-form-submitted {...}]))))
+
+  (oak/defc child-component [...]
+    [:form {:oak/on {:submit [::child-form-submitted {...}]}}
+     ...
+     [:button {:type :submit}
+      "Save"]])
+
+  (defmethod oak/handle [::child-form-listener ::notify-child-form-submitted] [state ev]
+    (-> state
+        (update-local assoc :child-visible? false)
+        ...))
+
+  (oak/defc parent-component [...]
+    [:div
+     ^{:oak/listener-ev [::child-form-listener {...}]}
+     [child-component ...]])
+#+END_SRC
+
+This allows the child component to be re-used in different contexts - the notify
+event becomes part of the child's API, for each parent to handle.
+
+(I'm particularly interested in feedback on this, both the concept and the
+implementation - there are many, many different ways to handle it!)
+
+** Navigation - HTML5 history
+
+Oak provides basic navigation support, backed by [[https://github.com/juxt/bidi][Bidi]]. To set this up, you first
+need to initialise it on app startup:
+
+#+BEGIN_SRC clojure
+  (:require [oak.nav :as nav]
+            [oak.nav.bidi :as nav.bidi])
+
+  (def bidi-routes
+    ["" {"/home" :home
+         "/page2" :page-2}])
+
+  (defmethod oak/handle ::app-mounted [state _]
+    (-> state
+        (oak/with-cmd [::nav/init-nav {::nav/router (nav.bidi/->Router bidi-routes)}])))
+
+  (oak/defc app-root [...]
+    {:oak/on {:component-will-mount [::app-mounted]}}
+
+    [:div "Welcome!"])
+#+END_SRC
+
+You can then:
+- access the current location (in the form of a map containing ~:handler~,
+  ~:route-params~, ~:query-params~ and ~:history-state~) by calling ~(oak/*db*
+  ::nav/location)~.
+- change the location in your event handlers, using the ~[::nav/push-location
+  {:location {...}}]~ and ~[::nav/replace-location {:location {...}}]~ commands.
+- generate links - ~[:a (nav/link location) "Link text"]~
+
+You can also react to changes in the location using three multimethods -
+~nav/handle-mount~, ~nav/handle-change~ and ~nav/handle-unmount~, which have
+similar signatures to normal event handlers:
+
+#+BEGIN_SRC clojure
+  (defmethod nav/handle-mount :home [state {:keys [location]}]
+    (-> state
+        (oak/with-cmd [::http/request! {...}])))
+
+  (defmethod nav/handle-change :home [state {:keys [old-location new-location]}]
+    (-> state
+        ...))
+
+  (defmethod nav/handle-unmount :home [state {:keys [location]}]
+    (-> state
+        ;; tear down, if required
+        ...))
+#+END_SRC
+
+A view is considered to be re-mounted (from a nav point-of-view, even if the
+components aren't necessarily re-mounted) if either the handler or the
+route-params change - at which point, the old handler is un-mounted and the
+new handler mounted. If the query-params or the history-state changes, only
+~handle-change~ will be called.
+
+* Feedback? Want to contribute?
+
+Yes please! Please submit issues/PRs in the usual Github way. I'm also
+contactable through Twitter, or email.
+
+If you do want to contribute a larger feature, that's great - but
+please let's discuss it before you spend a lot of time implementing
+it. If nothing else, I'll likely have thoughts, design ideas, or
+helpful pointers :)
+
+* Thanks!
+
+Thanks to [[https://github.com/olical][Oliver Caldwell]] and [[https://github.com/krisajenkins][Kris Jenkins]] who have, over the years, contributed
+a awful lot to Oak, in the form of thoroughly fruitful discussions and debates!
+
+* LICENCE
+
+Copyright © 2018 James Henderson
+
+Oak is distributed under the Eclipse Public License - either version 1.0 or (at
+your option) any later version.
