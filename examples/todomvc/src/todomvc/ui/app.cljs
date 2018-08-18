@@ -9,14 +9,14 @@
 
 (defmethod oak/handle ::toggle-all [state _]
   (-> state
-      (update-in [:oak/db :todos] (fn [todos]
-                                    (into {}
-                                          (map (let [new-status (if (every? done? (vals todos))
-                                                                  :active
-                                                                  :done)]
-                                                 (fn [[todo-id todo]]
-                                                   [todo-id (assoc todo :status new-status)])))
-                                          todos)))))
+      (oak/update-db update :todos (fn [todos]
+                                     (into {}
+                                           (map (let [new-status (if (every? done? (vals todos))
+                                                                   :active
+                                                                   :done)]
+                                                  (fn [[todo-id todo]]
+                                                    [todo-id (assoc todo :status new-status)])))
+                                           todos)))))
 
 (oak/defc toggle-all-component []
   [:span
@@ -29,13 +29,13 @@
 (defmethod oak/handle ::new-todo-submitted [state {:keys [new-todo-label]}]
   (let [todo-id (random-uuid)]
     (-> state
-        (assoc-in [:oak/db :todos todo-id] {:todo-id todo-id
-                                            :label new-todo-label
-                                            :status :active})
+        (oak/update-db assoc-in [:todos todo-id] {:todo-id todo-id
+                                                  :label new-todo-label
+                                                  :status :active})
         (oak/update-local assoc :new-todo-label ""))))
 
 (oak/defc new-todo []
-  ^:oak/transient [{:keys [new-todo-label]} {:new-todo-label ""}]
+  {:oak/transients [{:keys [new-todo-label]} {:new-todo-label ""}]}
 
   [:form {:oak/on {:submit [::new-todo-submitted {:new-todo-label new-todo-label}]}}
    [:input.new-todo {:oak/bind [:new-todo-label]
@@ -44,16 +44,16 @@
 (defmethod oak/handle ::start-editing-todo [state {:keys [todo-id]}]
   (-> state
       (oak/update-local merge {:editing? true
-                               :new-label (get-in state [:oak/db :todos todo-id :label])})))
+                               :new-label (oak/get-db state get-in [:todos todo-id :label])})))
 
 (defmethod oak/handle ::stop-editing-todo [state {:keys [todo-id]}]
   (-> state
-      (oak/update-local (constantly {:editing? false
-                                     :new-label nil}))
-      (assoc-in [:oak/db :todos todo-id :label] (get-in state [:oak/local :new-label]))))
+      (oak/update-local merge {:editing? false
+                               :new-label nil})
+      (oak/update-db assoc-in [:todos todo-id :label] (oak/get-local state :new-label))))
 
 (oak/defc todo-item [{:keys [todo-id]}]
-  ^:oak/transient [{:keys [editing? new-label]} {:editing? false}]
+  {:oak/transients [{:keys [editing? new-label]} {:editing? false, :new-label nil}]}
 
   (let [{:keys [todo-id label status] :as todo} (oak/*db* get-in [:todos todo-id])]
     [:li {:class #{(cond
@@ -77,11 +77,11 @@
 
 (defmethod oak/handle ::todo-toggled [state {:keys [todo-id]}]
   (-> state
-      (update-in [:oak/db :todos todo-id :status] {:active :done, :done :active})))
+      (oak/update-db update-in [:todos todo-id :status] {:active :done, :done :active})))
 
 (defmethod oak/handle ::todo-deleted [state {:keys [todo-id]}]
   (-> state
-      (update-in [:oak/db :todos] dissoc todo-id)))
+      (oak/update-db update-in [:todos] dissoc todo-id)))
 
 (oak/defc todo-list [{:keys [todo-filter]}]
   [:ul.todo-list
@@ -127,10 +127,10 @@
 
 (defmethod oak/handle ::clear-completed [state _]
   (-> state
-      (update-in [:oak/db :todos] (fn [todos]
-                                    (into {}
-                                          (remove (comp done? val))
-                                          todos)))))
+      (oak/update-db update :todos (fn [todos]
+                                     (into {}
+                                           (remove (comp done? val))
+                                           todos)))))
 
 (oak/defc todo-clear []
   [:button.clear-completed {:oak/on {:click [::clear-completed]}
@@ -140,7 +140,7 @@
    "Clear completed"])
 
 (oak/defc ^:export page-root []
-  ^:oak/transient [{:keys [todo-filter]} {:todo-filter :all}]
+  {:oak/transients [{:keys [todo-filter]} {:todo-filter :all}]}
 
   [:div
    [:section.todoapp

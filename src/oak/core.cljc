@@ -48,14 +48,19 @@
 (defn- get-focus [state]
   (get-in state [:oak/ctx :oak/focus]))
 
-(defn get-local [state]
-  (get-in state (into [:oak/app] (get-focus state))))
-
-(defn assoc-local [state val]
-  (assoc-in state (into [:oak/app] (get-focus state)) val))
+(defn get-local
+  ([state] (get-local state identity))
+  ([state f & args] (apply f (get-in state (into [:oak/app] (get-focus state))) args)))
 
 (defn update-local [state f & args]
-  (assoc-in state (into [:oak/app] (get-focus state)) (apply f (get-local state) args)))
+  (apply update-in state (into [:oak/app] (get-focus state)) f args))
+
+(defn get-db
+  ([state] (get-db state identity))
+  ([state f & args] (apply f (:oak/db state) args)))
+
+(defn update-db [state f & args]
+  (apply update state :oak/db f args))
 
 (defn- handle* [{:oak/keys [app db ctx] :as state} [event-type event-args]]
   (if-let [handle (if-let [event-handlers (:oak/event-handlers ctx)]
@@ -159,7 +164,7 @@
       #?(:clj (lookup !atom)
          :cljs @(r/track lookup !atom)))))
 
-(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/transients oak/lifecycles oak/render] :as args}]
+(defn- reagent-class [{{:oak/keys [!app !db focus] :as ctx} :oak/ctx, :keys [display-name oak/->transients oak/lifecycles oak/render] :as args}]
   (let [lifecycle-fns (->> lifecycles
                            (into {} (map (fn [[lifecycle [event-type event-args]]]
                                            [lifecycle #(send! ctx [event-type (merge event-args {:oak/lifecycle-args %&})])]))))
@@ -167,24 +172,26 @@
         update-in-focus (fn [m f & args]
                           (if focus
                             (apply update-in m focus f args)
-                            (apply f m args)))]
+                            (apply f m args)))
+
+        transient-key (gensym display-name)]
 
     (-> (merge lifecycle-fns
                (when display-name {:display-name display-name})
-               (when transients
+               (when ->transients
                  {:component-will-mount (comp second
                                               (juxt (fn [& _]
-                                                      (swap! !app update-in-focus merge (when-let [{:oak/keys [->transients]} transients]
-                                                                                          (->transients))))
+                                                      (swap! !app update-in-focus merge (->transients)))
 
                                                     (or (:component-will-mount lifecycle-fns)
-                                                        (fn [& _] {:oak/app @!app, :oak/db @!db}))))
+                                                        (constantly nil))))
 
                   :component-will-unmount (comp second
                                                 (juxt (fn [& _]
-                                                        (swap! !app update-in-focus #(apply dissoc % (:oak/transient-keys transients))))
+                                                        (swap! !app update-in-focus #(apply dissoc % (:oak/transient-keys (meta ->transients)))))
+
                                                       (or (:component-will-unmount lifecycle-fns)
-                                                          (fn [& _] {:oak/app @!app, :oak/db @!db}))))})
+                                                          (constantly nil))))})
 
                {:reagent-render (fn [& params]
                                   (binding [*local* (tracker !app focus)
@@ -223,40 +230,29 @@
    (defn- ^:export edn->clj* [obj]
      (edn/read-string obj)))
 
-(defn- parse-body-forms [body]
-  (loop [[form & more-forms :as body] body
-         res {}]
-    (if form
-      (let [m (meta form)]
-        (cond
-          (:oak/transient m) (recur more-forms {:oak/transients form})
-          (:oak/lifecycle m) (recur more-forms {:oak/lifecycles form})
-          :else (merge res {:body body})))
+(defn ->component* {:style/indent :defn} [sym params [maybe-opts & body]]
+  (let [[{:keys [oak/transients], lifecycles :oak/on} body] (if (map? maybe-opts)
+                                                              [maybe-opts body]
+                                                              [nil (cons maybe-opts body)])
 
-      (throw (ex-info "Missing component" {})))))
+        transient-keys (set (keys (second transients)))]
 
-(defn ->component* {:style/indent :defn} [sym params body]
-  (let [{:keys [oak/transients oak/lifecycles body]} (parse-body-forms body)
-        transients-sym (symbol (name 'oak.transients) (name (gensym sym)))]
-    `(let [transients# ~(when transients
-                          {:oak/transient-keys (set (keys (second transients)))
-                           :oak/->transients `(fn []
-                                                ~(second transients))})
+    `(-> (fn [ctx#]
+           (#'reagent-class {:oak/ctx ctx#
+                             :oak/->transients ~(when transients
+                                                  `(-> (fn []
+                                                         ~(second transients))
+                                                       (with-meta {:oak/transient-keys ~transient-keys})))
+                             :oak/lifecycles ~lifecycles
+                             :display-name ~(str (str *ns*) "/" (name sym))
+                             :oak/render (fn ~sym [~@params]
+                                           ~@(if transients
+                                               [`(let [~(first transients) (*local* select-keys ~transient-keys)]
+                                                   ~@body)]
 
-           render# (fn ~sym [~@params]
-                     ~@(if transients
-                         `[(let [~(first transients) (*local* identity)]
-                             ~@body)]
-
-                         body))]
-       (-> (fn [ctx#]
-             (#'reagent-class {:oak/ctx ctx#
-                               :oak/transients transients#
-                               :oak/lifecycles ~lifecycles
-                               :display-name ~(str (str *ns*) "/" (name sym))
-                               :oak/render render#}))
-           memoize
-           (with-meta {:oak/component? true})))))
+                                               body))}))
+         memoize
+         (with-meta {:oak/component? true}))))
 
 #?(:clj
    (defmacro ->component {:style/indent :defn}
