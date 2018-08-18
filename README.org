@@ -232,7 +232,7 @@ In the 'transients' option, we're specifying a binding for our transient state,
 and the initial value. Transient state is stored in the local component state,
 and is updated in the same way - likewise, it can be used in 'binds'.
 
-*** Child -> parent communication
+*** Child → parent communication
 
 Often, child components need to relay something the user's done to their parent
 component - let's say, the user's finished with the child component and wants it
