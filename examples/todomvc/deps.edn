@@ -5,7 +5,7 @@
         me.shenfeng/mustache {:mvn/version "1.1"}
         cider/cider-nrepl {:mvn/version "0.16.0"}
 
-        jarohen/bounce {:local/root "../../../bounce"}
+        jarohen/bounce {:mvn/version "0.0.1-rc1"}
         jarohen/oak {:local/root "../../"}}
 
  :paths ["src" "resources"]

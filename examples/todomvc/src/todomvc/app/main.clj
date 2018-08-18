@@ -51,12 +51,11 @@
 
            (constantly (resp/not-found "Not Found"))))
 
-(b/defcomponent server
-  ^:bounce/deps #{cljs-compiler}
-
+(b/defcomponent server {:bounce/deps #{cljs-compiler}}
   (-> (http/start-server #'handler {:port 3000})
       (b/with-stop (.close server))))
 
 (defn -main []
   (nrepl/start-server :port 7888 :handler (nrepl-handler))
-  (b/start! #{#'server}))
+  (b/set-opts! #{'todomvc.app.main/server})
+  (b/start!))
